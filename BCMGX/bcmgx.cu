@@ -403,9 +403,9 @@ int * read_laplacian_file(const char *file_name){
 }
 
 
-#define USAGE "\nUsage: bcmg [--matrix <FILE_NAME> | --laplacian-3d <FILE_NAME> | --laplacian <SIZE>] --settings <FILE_NAME>\n\n"\
+#define USAGE "\nUsage: bcmgx [--matrix <FILE_NAME> | --laplacian-3d <FILE_NAME> | --laplacian <SIZE>] --settings <FILE_NAME>\n\n"\
                    "\tYou can specify only one out of the three available options: --matrix, --laplacian-3d and --laplacian\n\n"\
-	           "\t-m, --matrix <FILE_NAME>         Read the matrix from file <FILE_NAME>.\n"\
+	           "\t-m, --matrix <FILE_NAME>         Read the matrix from file <FILE_NAME> in \"Matrix Market\" format\n"\
 	           "\t-l, --laplacian-3d <FILE_NAME>   Read generation parameters from file <FILE_NAME>.\n"\
 		   "\t-a, --laplacian <SIZE>           Generate a matrix whose size is <SIZE>^3.\n"\
 	           "\t-s, --settings <FILE_NAME>       Read settings from file <FILE_NAME>.\n\n"
