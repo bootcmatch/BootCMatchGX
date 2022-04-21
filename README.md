@@ -74,4 +74,4 @@ The are 14 parameters:
 * rtol: relative accuracy on the solution
 * mem_alloc_size: memory size of the data structures used to exchange data between processes
  
-An example of configuration file is given in */AMGsettings_base*
+An example of configuration file is given in *AMGsettings*
