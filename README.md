@@ -16,7 +16,7 @@ The software requires:
 Set the following variables inside the Makefile located in *BCMGX*:
 * CUDA_HOME
 * MPI_DIR
-* CUB_PATH
+* CUB_PATH (Not needed for CUDA >= 11.0)
 * GPU_ARCH
 * NSPARSE_GPU_ARCH
 
