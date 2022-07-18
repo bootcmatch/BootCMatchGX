@@ -10,13 +10,15 @@ The software requires:
 * GCC >= 5.0
 * CUDA >= 9.0
 * **[CUB](https://nvlabs.github.io/cub/)**: we tested the code for the version: 1.7.4., but any newer version should work as well.
-  * Install the software and setup the variable **CUB_PATH** in the BootCMatchGX's Makefile: e.g., CUB_PATH = ./cub-1.7.4
+  * Install the software and setup the variable **CUB_PATH** in the BootCMatchGX's Makefile: e.g., CUB_PATH = ./cub-1.7.4 or CUB_PATH = . if you are using CUDA >= 11.0
 * **[NSPARSE](https://github.com/EBD-CREST/nsparse)**: We included in this repository a slightly modified version *NSPARSE* that supports CUDA >= 9.0. This is located in *EXTERNAL*
 
-Set the following variables inside the Makefile located in *src*:
+Set the following variables inside the Makefile located in *BCMGX*:
 * CUDA_HOME
 * MPI_DIR
-* CUB_PATH
+* CUB_PATH (Not needed for CUDA >= 11.0)
+* GPU_ARCH
+* NSPARSE_GPU_ARCH
 
 ### Compilation
 
