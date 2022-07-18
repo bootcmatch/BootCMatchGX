@@ -3,7 +3,7 @@ CC = $(CUDA_HOME)/bin/nvcc
 NVCC_FLAG = -std=c++14 -DOMPI_SKIP_MPICXX
 GPU_ARCH = -arch=sm_70
 MPI_DIR = /usr/local
-CUB_PATH = .
+CUB_PATH = ../EXTERNAL/nsparse-master/cub-1.7.4/cub
 NSPARSE_PATH = ../EXTERNAL/nsparse-master/cuda-c
 NSPARSE_GPU_ARCH = -arch=sm_70
 LIBS = -L$(CUDA_HOME)/lib64 -lcudart -lcusparse -lcublas -lcusolver -lcurand -L$(MPI_DIR)/lib -lmpi 
@@ -17,7 +17,7 @@ TARGETDIR   := bin
 
 all: $(TARGETDIR)/bcmgx
 
-OBJECTS = $(BUILDDIR)/matchingAggregation.o $(BUILDDIR)/solver.o $(BUILDDIR)/utils.o $(BUILDDIR)/CSR.o $(BUILDDIR)/AMG.o $(BUILDDIR)/matrixIO.o  $(BUILDDIR)/myMPI.o $(BUILDDIR)/nsparse.o  $(BUILDDIR)/spspmpi.o $(BUILDDIR)/handles.o $(BUILDDIR)/scalar.o $(BUILDDIR)/vector.o $(BUILDDIR)/solutionAggregator.o
+OBJECTS = $(BUILDDIR)/matchingAggregation.o $(BUILDDIR)/solver.o $(BUILDDIR)/utils.o $(BUILDDIR)/CSR.o $(BUILDDIR)/AMG.o $(BUILDDIR)/matrixIO.o  $(BUILDDIR)/myMPI.o $(BUILDDIR)/nsparse.o  $(BUILDDIR)/spspmpi.o $(BUILDDIR)/handles.o $(BUILDDIR)/scalar.o $(BUILDDIR)/vector.o $(BUILDDIR)/solutionAggregator.o $(BUILDDIR)/getmct.o
 
 $(TARGETDIR)/bcmgx: $(MAIN) $(OBJECTS)
 	$(CC) -g $^ -o $@ $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $(LIBS) $(OPT)
@@ -52,6 +52,9 @@ $(BUILDDIR)/myMPI.o: src/utility/myMPI.cu
 	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
 
 $(BUILDDIR)/AMG.o: src/AMG/AMG.cu
+	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
+
+$(BUILDDIR)/getmct.o: src/spmspmMGPU/getmct.cu
 	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
 
 $(BUILDDIR)/spspmpi.o: src/spmspmMGPU/spspmpi.cu

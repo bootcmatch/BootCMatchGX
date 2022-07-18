@@ -32,7 +32,7 @@ struct halo_info{
 typedef struct rows_info{
   vector<itype> *nnz_per_row_shift;
   itype rows2bereceived;
-  itype total_row_to_rec;
+  //itype total_row_to_rec;
   itype countall;
   itype *P_n_per_process;
   int *scounts;
@@ -66,7 +66,7 @@ typedef struct{
 
   itype row_shift;
 
-  itype local_m;  // this variable should be removed
+//  itype local_m;  // this variable should be removed
 
   // Matrix's cusparse descriptor
   cusparseMatDescr_t *descr;

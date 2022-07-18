@@ -22,14 +22,22 @@ void _triple_innerproduct( itype n, vtype *r, vtype *w, vtype *q, vtype *v, vtyp
   int lane = tid % FULL_WARP;
   int i = tid;
 
-  if(i >= n){
-    if(lane == 0){
-      alpha_shared[warp] = 0.;
-      beta_shared[warp] = 0.;
-      gamma_shared[warp] = 0.;
-    }
-    return;
-  }
+  //if(i >= n){
+  //  if(lane == 0){
+  //    alpha_shared[warp] = 0.;
+  //    beta_shared[warp] = 0.;
+  //    gamma_shared[warp] = 0.;
+  //  }
+  //  return;
+  //}
+
+  if(threadIdx.x < FULL_WARP){
+     alpha_shared[threadIdx.x] = 0.;
+     beta_shared[threadIdx.x] = 0.;
+     gamma_shared[threadIdx.x] = 0.;
+  } 
+  __syncthreads();
+  if(i >= n) { return; }
 
   vtype v_i = v[i+shift];
   vtype alpha_i = r[i] * v_i;
@@ -113,7 +121,7 @@ void _double_merged_axpy(itype n, vtype *x0, vtype *x1, vtype *x2, vtype alpha_0
 
 
 void double_merged_axpy(vector<vtype> *x0, vector<vtype> *x1, vector<vtype> *y, vtype alpha_0, vtype alpha_1, itype n, itype shift){
-
+  
   gridblock gb = gb1d(n, BLOCKSIZE);
   _double_merged_axpy<<<gb.g, gb.b>>>(n, x0->val, x1->val, y->val, alpha_0, alpha_1, shift);
 

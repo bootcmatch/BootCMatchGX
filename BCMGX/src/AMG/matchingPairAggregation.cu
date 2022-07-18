@@ -135,17 +135,17 @@ CSR* makeP_GPU(CSR *A, vector<itype> *M, vector<vtype> *w){
   );
 
   itype *num_selected_out = Scalar::getvalueFromDevice(d_num_selected_out);
-  gb = gb1d(*num_selected_out, BLOCKSIZE);
+  gb = gb1d(*num_selected_out, BLOCKSIZE); 
   _aggregate_symmetric_sort<<<gb.g, gb.b>>>(*num_selected_out, P->col, M->val, comp_Pcol);
 
-  gb = gb1d(A->n, BLOCKSIZE);
+  gb = gb1d(A->n, BLOCKSIZE); 
   _aggregate_symmetric_step_two<<<gb.g, gb.b>>>(A->n, P->val, M->val, P->col, w->val, d_num_selected_out->val, A->row_shift);
 
   free(num_selected_out);
   num_selected_out = Scalar::getvalueFromDevice(d_num_selected_out);
   P->m = (*num_selected_out);
 
-  gb = gb1d(A->n+1, BLOCKSIZE);
+  gb = gb1d(A->n+1, BLOCKSIZE); 
   _make_P_row<<<gb.g, gb.b>>>(A->n, P->row);
   cudaDeviceSynchronize();
   free(num_selected_out);

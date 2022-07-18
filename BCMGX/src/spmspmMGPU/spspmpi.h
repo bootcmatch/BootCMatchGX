@@ -25,4 +25,3 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol );
 CSR* nsparseMGPU_noCommu(handles *h, CSR *Alocal, CSR *Plocal);
 
 CSR* nsparseMGPU_commu(handles *h, CSR *Alocal, CSR *Plocal);
-

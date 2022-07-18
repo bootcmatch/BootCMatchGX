@@ -191,35 +191,29 @@ CSR* nsparseMGPU(CSR *Alocal, CSR *Pfull, csrlocinfo *Plocal) {
 
 
 
-
 vector<int> *get_missing_col( CSR *Alocal, CSR *Plocal ){
   _MPI_ENV;
-  itype Pn, mypfirstrow, myplastrow;
-  gridblock gb;
+  if(nprocs == 1){ 
+     vector<int> *_bitcol = Vector::init<int>(1, true, false);
+     return _bitcol; 
+  }
+  itype mypfirstrow, myplastrow;
+  //gridblock gb;
+  int *getmct(itype *,itype,itype,itype,int *,int);
   
   if ( Plocal != NULL ){
-    Pn = Plocal->full_n;
     mypfirstrow = Plocal->row_shift;
     myplastrow  = Plocal->n + Plocal->row_shift-1;
   }else{
-    Pn = Alocal->full_n;
     mypfirstrow = Alocal->row_shift;
     myplastrow  = Alocal->n + Alocal->row_shift-1;
   }// P_n_per_process[i]: number of rows that process i have of matrix P 
 
-  itype size_mask = (Pn+(((sizeof(int)*BITXBYTE))-1))/(sizeof(int)*BITXBYTE);
-  vector<int> *dev_bitcol = Vector::init<int>(size_mask, true, true);
-  Vector::fillWithValue(dev_bitcol, 0);
-
-  if(Alocal->nnz){
-  	gb = gb1d(Alocal->nnz, NUM_THR);
-  	_getColMissingMap<<<gb.g, gb.b>>>( Alocal->nnz, mypfirstrow, myplastrow, Alocal->col, dev_bitcol->val );
-  }else{
-    printf("\n%d local->nnz == 0\n\n", myid);
-  }
-  vector<int> *_bitcol = Vector::copyToHost(dev_bitcol);
-
-  Vector::free(dev_bitcol);
+  if(Alocal->nnz==0) { return NULL; }
+  int uvs;
+  int *ptr = getmct( Alocal->col, Alocal->nnz, mypfirstrow, myplastrow, &uvs, NUM_THR);
+  vector<int> *_bitcol = Vector::init<int>(uvs, false, false);
+  _bitcol->val=ptr;
   return _bitcol;
 }
 
@@ -235,20 +229,13 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
 
   Alocal->rows_to_get = (rows_to_get_info *) Malloc( sizeof(rows_to_get_info) );
 
-  itype Pn, mypfirstrow, myplastrow;
   itype *P_n_per_process;
   P_n_per_process = (itype*) Malloc(sizeof(itype)*nprocs);
 
   // send rows numbers to each process, Plocal->n local number of rows 
   if ( Plocal != NULL ){
-    Pn = Plocal->full_n;
-    mypfirstrow = Plocal->row_shift;
-    myplastrow  = Plocal->n + Plocal->row_shift-1;
     CHECK_MPI( MPI_Allgather( &Plocal->n, sizeof(itype), MPI_BYTE, P_n_per_process, sizeof(itype), MPI_BYTE, MPI_COMM_WORLD ) );
   }else{
-    Pn = Alocal->full_n;
-    mypfirstrow = Alocal->row_shift;
-    myplastrow  = Alocal->n + Alocal->row_shift-1;
     CHECK_MPI( MPI_Allgather( &Alocal->n, sizeof(itype), MPI_BYTE, P_n_per_process, sizeof(itype), MPI_BYTE, MPI_COMM_WORLD ) );
   }// P_n_per_process[i]: number of rows that process i owns of matrix P 
 
@@ -271,39 +258,10 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
   int cntothercol=0;
   int whichproc;
   itype *othercol[1]={NULL};
-  itype *bitcol[1];
 
   unsigned int i, j;
-  itype size_mask = (Pn+(((sizeof(int)*BITXBYTE))-1))/(sizeof(int)*BITXBYTE);
-
-  bitcol[0] = _bitcol->val;
-
-  cntothercol = 0; // number of rows that we need from other processes
-  for(i=0; i<size_mask; i++){
-	int cc = __builtin_popcount(bitcol[0][i]);
-	cntothercol += cc;
-  }
-
-  if(cntothercol>0) {
-    othercol[0]=(itype *)Malloc(cntothercol*sizeof(itype));
-    itype scratch, col;
-    int k;
-    for(i=0, j=0; i<size_mask; i++){
-        if(bitcol[sothercol][i]) {
-           scratch=bitcol[sothercol][i];	
-	   while(scratch) {
-	   	k=__builtin_ffs(scratch);
-		col=(i*(sizeof(itype)*BITXBYTE))+(k-1);
-		if(col<mypfirstrow||col>myplastrow) {
-	   		othercol[sothercol][j]=col;
-			j++;
-		}
-		scratch &= ~(1UL << (k-1));
-	   }
-	   if(j==cntothercol) { break; }
-	}
-    }
-  } // othercol: contains the rows number we need to retrieve from other processes
+  cntothercol=_bitcol->n;
+  othercol[sothercol]=_bitcol->val;
 
   // the last list is in othercol[sothercol]
   for(i=0; i<nprocs; i++){
@@ -353,7 +311,6 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
      fprintf(stderr,"self countp should be zero! %d\n",myid);
      exit(1);
   }
-  free(othercol[sothercol]);
 
   if(MPI_Alltoall(countp,sizeof(itype),MPI_BYTE,rcvcntp,sizeof(itype),MPI_BYTE,MPI_COMM_WORLD)!=MPI_SUCCESS) {
      fprintf(stderr,"Error in MPI_Alltoall of P rows\n");
@@ -377,7 +334,7 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
      rcvprow=(itype *)Malloc(sizeof(itype)*countall);
   }
 
-  if( MPI_Alltoallv(whichprow,scounts,displs,MPI_BYTE,rcvprow,rcounts,displr,MPI_BYTE,MPI_COMM_WORLD)!=MPI_SUCCESS) {
+  if( MPI_Alltoallv(whichprow,scounts,displs,MPI_BYTE,rcvprow,rcounts,displr,MPI_BYTE,MPI_COMM_WORLD) != MPI_SUCCESS) {
      fprintf(stderr,"Error in MPI_Alltoallv of whichprow rows\n");
      exit(1);
   }
@@ -385,6 +342,8 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
   memset(scounts, 0, nprocs*sizeof(int));
   memset(displs, 0, nprocs*sizeof(int));
   vector<itype> *nnz_per_row_shift = NULL;
+  // total_row_to_rec actually store the total rows to send, the sum of the number of rows we must send to each process i
+  // rcvcntp[i] = number of rows to send to process i
   itype total_row_to_rec = countall;
   countall = 0;
   if(total_row_to_rec){
@@ -410,7 +369,8 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
     }
   }
 
-  Alocal->rows_to_get->total_row_to_rec = total_row_to_rec;
+
+  //Alocal->rows_to_get->total_row_to_rec = total_row_to_rec;
   Alocal->rows_to_get->nnz_per_row_shift = nnz_per_row_shift;
   Alocal->rows_to_get->countall = countall;
   Alocal->rows_to_get->rcvprow = rcvprow;
@@ -426,8 +386,16 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
   Alocal->rows_to_get->rcvcntp = rcvcntp;
   Alocal->rows_to_get->P_n_per_process = P_n_per_process;
 
+  //if (Alocal->rows_to_get->total_row_to_rec != Alocal->rows_to_get->rows2bereceived){
+  //  printf(" !!! --- WARNING --- !!! : total_row_to_rec != rows2bereceived -- %d != %d -- %d \n", Alocal->rows_to_get->total_row_to_rec, Alocal->rows_to_get->rows2bereceived, cntothercol);
+  //  exit(1);
+  //}
+
   return ;
 }
+
+
+
 
 
 CSR* nsparseMGPU_noCommu(handles *h, CSR *Alocal, CSR *Plocal){
