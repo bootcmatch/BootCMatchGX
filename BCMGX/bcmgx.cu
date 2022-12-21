@@ -417,7 +417,7 @@ int main(int argc, char **argv){
   char *mtx_file = NULL;
   char *lap_3d_file = NULL;
   char *settings_file = NULL;
-  char ch;
+  signed char ch;
   itype n = 0;
 
   static struct option long_options[] ={
