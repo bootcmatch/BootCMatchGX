@@ -59,7 +59,7 @@ mpirun -np 2 bin/bcmgx -l cfg_files/lap3d_2.cfg -s ../AMGsettings
 
 The configuration file defines the preconditioning and solving procedure.
 
-The are 14 parameters:
+The configuration parameters are:
 
 * bootstrap_type: type of final AMG composition; 0 multiplicative, 1 symmetrized multi., 2 additive; NB: Here put 0 for single AMG component
 * max_hrc: max number of hierarchies in the final bootstrap AMG; NB: Here put 1 for single AMG component
