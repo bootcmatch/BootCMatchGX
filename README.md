@@ -61,15 +61,16 @@ The configuration file defines the preconditioning and solving procedure.
 
 The are 14 parameters:
 
-* solver_type: type of final AMG composition; 0 multiplicative, 1 symmetrized multi., 2 additive; NB: Here put 0 for single AMG component
+* bootstrap_type: type of final AMG composition; 0 multiplicative, 1 symmetrized multi., 2 additive; NB: Here put 0 for single AMG component
 * max_hrc: max number of hierarchies in the final bootstrap AMG; NB: Here put 1 for single AMG component
 * rho: desired convergence rate of the composite AMG; NB: This is not generally obtained if criterion on max_hrc is reached
-* aggrsweeps: pairwise aggregation steps; 1 for single step, 2 for pairs; 3 for double pairs ...
-* aggr_type: type of prolongation; 0 unsmoothed, 1 smoothed
+* matchtype: 3 Suitor
+* aggrsweeps: pairwise aggregation steps; 0 pairs; 1 double pairs, etc ...
+* aggr_type; 0 unsmoothed, 1 smoothed (not yet supported)
 * max_levels: max number of levels built for the single hierarchy
-* cycle_type: 0-Vcycle, 1-Hcycle (V-cycle at odd levels and W at even levels), 2-Wcycle
-* coarsest_solver_type: 0 Jacobi, 4 L1-smoother
-* relax_type: 0 Jacobi, 4 L1-smoother
+* cycle_type: 0-Vcycle, 1-Hcycle, 2-Wcycle
+* coarse_solver: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 L1-smoother
+* relax_type: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 L1-smoother
 * relaxnumber_coarse: number of iterations for the coarsest solver
 * prerelax_sweeps: number of pre-smoother iterations at the intermediate levels
 * postrelax_sweeps: number of post-smoother iterations at the intermediate levels
