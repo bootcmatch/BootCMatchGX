@@ -1,14 +1,14 @@
-NONE                % rhs file NONE if not present
-NONE                % sol file NONE if not present
-0                   % solver_type: 0 multiplicative, 1 symmetrized multi., 2 additive; NB: Here put 0 for single AMG component
-1                   % max_hrc, in bootstrap AMG, max hierarchies; NB: Here put 1 for single AMG component
-0.8                 % desired convergence rate of the composite AMG; NB: This is not generally obtained if criterion on max_hrc is reached
-3                  % matchtype: 0, Preis; 1 HSL-mc64; 2 Spral-Auction
-2                  % aggrsweeps; passi di aggregazione a coppie. 0, pairs; 1 double pairs ...
-0                  % aggr_type; 0 unsmoothed, 1 smoothed
+NONE               % rhs file NONE if not present
+NONE               % sol file NONE if not present
+0                  % bootstrap_type: 0 multiplicative, 1 symmetrized multi., 2 additive; NB: This is the composition rule when bootstrap is applied and more than 1 AMG hierarchy is setup
+1                  % max_hrc, in bootstrap AMG, max hierarchies; NB: Here put 1 for single AMG component
+0.8                % desired convergence rate of the composite AMG; NB: This is not generally obtained if criterion on max_hrc is reached
+3                  % matchtype: 3 Suitor
+2                  % aggrsweeps; pairs aggregation steps. 0 pairs; 1 double pairs, etc ...
+0                  % aggr_type; 0 unsmoothed, 1 smoothed (not yet supported)
 39                 % max_levels; max number of levels built for the single hierarchy
-0                  % cycle_type: 0-Vcycle, 1-Hcycle, 2-Wcycle, 3-Kcycle
-4                  % coarse_solver: 9  SuperLU
+0                  % cycle_type: 0-Vcycle, 1-Hcycle, 2-Wcycle
+4                  % coarse_solver: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 L1-smoother
 4                  % relax_type: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 L1-smoother
 20                 % relaxnumber_coarse
 4                  % prerelax_sweeps
