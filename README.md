@@ -69,8 +69,8 @@ The configuration parameters are:
 * aggr_type; 0 unsmoothed, 1 smoothed (not yet supported)
 * max_levels: max number of levels built for the single hierarchy
 * cycle_type: 0-Vcycle, 1-Hcycle, 2-Wcycle
-* coarse_solver: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 L1-smoother
-* relax_type: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 L1-smoother
+* coarse_solver: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 l1-Jacobi
+* relax_type: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 l1-Jacobi
 * relaxnumber_coarse: number of iterations for the coarsest solver
 * prerelax_sweeps: number of pre-smoother iterations at the intermediate levels
 * postrelax_sweeps: number of post-smoother iterations at the intermediate levels
