@@ -8,8 +8,8 @@ NONE               % sol file NONE if not present
 0                  % aggr_type; 0 unsmoothed, 1 smoothed (not yet supported)
 39                 % max_levels; max number of levels built for the single hierarchy
 0                  % cycle_type: 0-Vcycle, 1-Hcycle, 2-Wcycle
-4                  % coarse_solver: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 L1-smoother
-4                  % relax_type: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 L1-smoother
+4                  % coarse_solver: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 l1-Jacobi
+4                  % relax_type: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 l1-Jacobi
 20                 % relaxnumber_coarse
 4                  % prerelax_sweeps
 4                  % postrelax_sweeps
