@@ -2,10 +2,10 @@ BootCMatchGX
 Bootstrap AMG based on Compatible weighted Matching for multiple GPUs, version 1.0
 (C) Copyright 2022
                        
-				 Massimo Bernaschi    IAC-CNR, IT
-				 Alessandro Celestini IAC-CNR, IT
-         			 Pasqua D'Ambra       IAC-CNR, IT
-         			 Flavio Vella         University of Trento, IT & IAC-CNR
+				 Massimo Bernaschi    IAC-CNR, Rome, IT
+				 Alessandro Celestini IAC-CNR, Rome, IT
+         			 Pasqua D'Ambra       IAC-CNR, Naples, IT
+         			 Flavio Vella         University of Trento & IAC-CNR, IT
          
 Released under the MIT license
 http://opensource.org/licenses/mit-license.php
