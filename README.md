@@ -49,11 +49,11 @@ The directory *src/cfg_files* contains three examples of configuration files tha
 The following are three examples of how you can run the solver in the three different running modes using 2 MPI processes:
 
 ```sh
-mpirun -np 2 bin/bcmgx -m ../test_matrix/poisson_100x100.mtx -s ../AMGsettings
+mpirun -np 2 bin/sample_main -m ../test_matrix/poisson_100x100.mtx -s ../AMGsettings
 
-mpirun -np 2 bin/bcmgx -a 126 -s ../AMGsettings
+mpirun -np 2 bin/sample_main -a 126 -s ../AMGsettings
 
-mpirun -np 2 bin/bcmgx -l cfg_files/lap3d_2.cfg -s ../AMGsettings
+mpirun -np 2 bin/sample_main -l cfg_files/lap3d_2.cfg -s ../AMGsettings
 
 ```
 
