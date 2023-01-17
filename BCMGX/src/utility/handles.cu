@@ -14,6 +14,7 @@
     CHECK_DEVICE( cudaStreamCreate(&(h->stream2)) );
     CHECK_DEVICE( cudaStreamCreate(&(h->stream3)) );
     CHECK_DEVICE( cudaStreamCreate(&(h->stream4)) );
+    CHECK_DEVICE( cudaStreamCreate(&(h->stream_free)) );
 
     CHECK_CUSPARSE( cusparseSetStream(h->cusparse_h1, h->stream1) );
 
@@ -30,5 +31,6 @@
     CHECK_DEVICE( cudaStreamDestroy(h->stream2) );
     CHECK_DEVICE( cudaStreamDestroy(h->stream3) );
     CHECK_DEVICE( cudaStreamDestroy(h->stream4) );
+    CHECK_DEVICE( cudaStreamDestroy(h->stream_free) );
     std::free(h);
   }

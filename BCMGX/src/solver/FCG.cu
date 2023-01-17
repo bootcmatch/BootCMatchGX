@@ -1,6 +1,16 @@
 #pragma once
 
 #include "FCG.h"
+#include "basic_kernel/halo_communication/local_permutation.h"
+#include "basic_kernel/halo_communication/extern2.h"
+#include "basic_kernel/halo_communication/extern.h"
+#include "basic_kernel/matrix/vector.cu"
+#include "prec_apply/GAMG_cycle.h"
+
+#include <string.h>
+#include <cmath>
+
+#include "utility/utils.h"
 
 float TOTAL_CSRVECTOR_TIME=0.;
 float TOTAL_NORMMPI_TIME=0.;
@@ -10,6 +20,96 @@ float TOTAL_TRIPLEPROD_TIME=0.;
 float TOTAL_DOUBLEMERGED_TIME=0.;
 float TOTAL_NORMPI2_TIME=0.;
 float TOTAL_RESTPRE_TIME=0.;
+
+FCGPreconditionContext FCG::context;
+
+void FCG::initPreconditionContext(hierarchy *hrrch){
+    PUSH_RANGE(__func__, 4)
+
+    FCG::context.hrrch = hrrch;
+    int num_levels = hrrch->num_levels;
+
+    FCG::context.max_level_nums = num_levels;
+    FCG::context.max_coarse_size = (itype*) malloc( num_levels * sizeof(int));
+    assert(FCG::context.max_coarse_size != NULL);
+
+    vectorCollection<vtype> *RHS_buffer = Vector::Collection::init<vtype>(num_levels);
+
+    vectorCollection<vtype> *Xtent_buffer_local = Vector::Collection::init<vtype>(num_levels);
+    vectorCollection<vtype> *Xtent_buffer_2_local = Vector::Collection::init<vtype>(num_levels);
+
+    // !skip the first
+    for(int i=0; i<num_levels; i++){
+      itype n_i = hrrch->A_array[i]->n;
+      itype n_i_full = hrrch->A_array[i]->full_n;
+      FCG::context.max_coarse_size[i] = n_i;
+      Vectorinit_CNT
+      RHS_buffer->val[i] = Vector::init<vtype>(n_i, true, true);
+      Vectorinit_CNT
+      Xtent_buffer_local->val[i] = Vector::init<vtype>( (i!=num_levels-1) ? n_i : n_i_full , true, true);
+      Vectorinit_CNT
+      Xtent_buffer_2_local->val[i] = Vector::init<vtype>( (i!=num_levels-1) ? n_i : n_i_full , true, true);
+      Vector::fillWithValue(Xtent_buffer_local->val[i], 0.);
+      Vector::fillWithValue(Xtent_buffer_2_local->val[i], 0.);
+    }
+
+    FCG::context.RHS_buffer = RHS_buffer;
+
+    FCG::context.Xtent_buffer_local = Xtent_buffer_local;
+    FCG::context.Xtent_buffer_2_local = Xtent_buffer_2_local;
+
+    POP_RANGE
+}
+
+void FCG::setHrrchBufferSize(hierarchy *hrrch){
+    int num_levels = hrrch->num_levels;
+    assert(num_levels <= FCG::context.max_level_nums);
+
+    for(int i=0; i<num_levels; i++){
+      itype n_i = hrrch->A_array[i]->n;
+      itype n_i_full = hrrch->A_array[i]->full_n;
+
+      if(n_i > FCG::context.max_coarse_size[i]){
+        // make i-level's buffer bigger
+
+        FCG::context.max_coarse_size[i] = n_i;
+        Vector::free(FCG::context.RHS_buffer->val[i]);
+        Vectorinit_CNT
+        FCG::context.RHS_buffer->val[i] = Vector::init<vtype>(n_i, true, true);
+
+
+        Vector::free(FCG::context.Xtent_buffer_local->val[i]);
+        Vector::free(FCG::context.Xtent_buffer_2_local->val[i]);
+
+        if (i == num_levels-1) {
+            Vectorinit_CNT
+            FCG::context.Xtent_buffer_local->val[i] = Vector::init<vtype>(n_i_full, true, true);
+            Vectorinit_CNT
+            FCG::context.Xtent_buffer_2_local->val[i] = Vector::init<vtype>(n_i_full, true, true);
+        } else {
+            Vectorinit_CNT
+            FCG::context.Xtent_buffer_local->val[i] = Vector::init<vtype>(n_i, true, true);
+            Vectorinit_CNT
+            FCG::context.Xtent_buffer_2_local->val[i] = Vector::init<vtype>(n_i, true, true);
+        }
+
+
+      }else{
+        FCG::context.RHS_buffer->val[i]->n = n_i;
+
+        FCG::context.Xtent_buffer_local->val[i]->n =    (i == num_levels-1) ? n_i_full : n_i ;
+        FCG::context.Xtent_buffer_2_local->val[i]->n =  (i == num_levels-1) ? n_i_full : n_i ;
+      }
+    }
+}
+
+void FCG::freePreconditionContext(){
+    free(FCG::context.max_coarse_size);
+    Vector::Collection::free(FCG::context.RHS_buffer);
+
+    Vector::Collection::free(FCG::context.Xtent_buffer_local);
+    Vector::Collection::free(FCG::context.Xtent_buffer_2_local);
+}
 
 __global__
 void _triple_innerproduct( itype n, vtype *r, vtype *w, vtype *q, vtype *v, vtype *alpha_beta_gamma, itype shift ){
@@ -76,9 +176,11 @@ void _triple_innerproduct( itype n, vtype *r, vtype *w, vtype *q, vtype *v, vtyp
 }
 
 void triple_innerproduct(vector<vtype> *r, vector<vtype> *w, vector<vtype> *q, vector<vtype> *v, vtype *alpha, vtype *beta, vtype *gamma, itype shift){
-
+  PUSH_RANGE(__func__,4)
+    
   assert(r->n == w->n &&  w->n == q->n);
 
+  Vectorinit_CNT
   vector<vtype> *alpha_beta_gamma = Vector::init<vtype>(3, true, true);
   Vector::fillWithValue(alpha_beta_gamma, 0.);
 
@@ -104,6 +206,7 @@ void triple_innerproduct(vector<vtype> *r, vector<vtype> *w, vector<vtype> *q, v
 
 
   Vector::free(alpha_beta_gamma);
+  POP_RANGE
 }
 
 
@@ -117,84 +220,113 @@ void _double_merged_axpy(itype n, vtype *x0, vtype *x1, vtype *x2, vtype alpha_0
   vtype xi1_local = alpha_0 * x0[i+shift] + x1[i+shift];
   x2[i+shift] = alpha_1 * xi1_local + x2[i+shift];
   x1[i+shift] = xi1_local;
+  
 }
 
 
 void double_merged_axpy(vector<vtype> *x0, vector<vtype> *x1, vector<vtype> *y, vtype alpha_0, vtype alpha_1, itype n, itype shift){
+  PUSH_RANGE(__func__,4)
   
   gridblock gb = gb1d(n, BLOCKSIZE);
   _double_merged_axpy<<<gb.g, gb.b>>>(n, x0->val, x1->val, y->val, alpha_0, alpha_1, shift);
 
+  POP_RANGE
 }
 
-
 void preconditionApply(handles *h, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, vector<vtype> *rhs, vector<vtype> *x){
+  PUSH_RANGE(__func__,4)
+    
   _MPI_ENV;
 
   vectorCollection<vtype> *RHS = FCG::context.RHS_buffer;
-  vectorCollection<vtype> *Xtent = FCG::context.Xtent_buffer;
+  vectorCollection<vtype> *Xtent_local = FCG::context.Xtent_buffer_local;
+  vectorCollection<vtype> *Xtent_2_local = FCG::context.Xtent_buffer_2_local;
+
 
   if(bootamg_data->solver_type == 0){
     for(int k=0; k<boot_amg->n_hrc; k++){
 
-  if(DETAILED_TIMING && ISMASTER){
-      TIME::start();
-  }
-  FCG::setHrrchBufferSize(boot_amg->H_array[k]);
+        if(DETAILED_TIMING && ISMASTER){
+            TIME::start();
+        }
+        FCG::setHrrchBufferSize(boot_amg->H_array[k]);
 
-  Vector::copyTo(RHS->val[0], rhs);
-  itype n, off;
-  if(nprocs>1) {
-      n=boot_amg->H_array[k]->A_array[0]->n; 
-      off=boot_amg->H_array[k]->A_array[0]->row_shift;
-      Vector::copyToWithOff(Xtent->val[0], x, n, off);
-  } else {
-      Vector::copyTo(Xtent->val[0], x);
-  }
-  if(DETAILED_TIMING && ISMASTER){
-      TOTAL_RESTPRE_TIME += TIME::stop();
-  } 
+        Vector::copyTo(RHS->val[0], rhs);
+        itype n, off;
+        if(nprocs>1) {
+            n=boot_amg->H_array[k]->A_array[0]->n; 
+            off=boot_amg->H_array[k]->A_array[0]->row_shift;
+            
+            // -----------------------------------------------------
+            Vector::copyTo(Xtent_local->val[0], x);
+            // -----------------------------------------------------
+                
+        } else {
+            // -----------------------------------------------------
+            Vector::copyTo(Xtent_local->val[0], x);
+            // -----------------------------------------------------
+        }
+        if(DETAILED_TIMING && ISMASTER){
+            TOTAL_RESTPRE_TIME += TIME::stop();
+        } 
+        
+        
+        // -------------------------------------------------------------------------------------------------
+        GAMG_cycle(h, k, bootamg_data, boot_amg, amg_cycle, RHS, Xtent_local, Xtent_2_local, 1);
+        // -------------------------------------------------------------------------------------------------
 
-  GAMG_cycle(h, k, bootamg_data, boot_amg, amg_cycle, RHS, Xtent, 1);
-  if(DETAILED_TIMING && ISMASTER){
-      TIME::start();
-  }
+            
+        if(DETAILED_TIMING && ISMASTER){
+            TIME::start();
+        }
 
-  CSR *A = boot_amg->H_array[k]->A_array[0];
-  if(nprocs>1) {
-      if(A->halo.to_receive->val[0]<off) {
-          off=A->halo.to_receive->val[0];
-      }
-      if((A->halo.to_receive->val[(A->halo.to_receive_n)-1]-A->halo.to_receive->val[0])>(A->n)) {
-          n=(1+A->halo.to_receive->val[(A->halo.to_receive_n)-1]-A->halo.to_receive->val[0]);
-      } else {
-	  n=A->n+(1+A->halo.to_receive->val[(A->halo.to_receive_n)-1]-A->halo.to_receive->val[0]);
-      }
-      Vector::copyToWithOff(x, Xtent->val[0],n,off);
-      } else {
-      	  Vector::copyTo(x, Xtent->val[0]);
-      }
+        
+        CSR *A = boot_amg->H_array[k]->A_array[0];
+        if(nprocs>1) {
+            if(A->halo.to_receive->val[0]<off) {
+                off=A->halo.to_receive->val[0];
+            }
+            if((A->halo.to_receive->val[(A->halo.to_receive_n)-1]-A->halo.to_receive->val[0])>(A->n)) {
+                n=(1+A->halo.to_receive->val[(A->halo.to_receive_n)-1]-A->halo.to_receive->val[0]);
+            } else {
+                n=A->n+(1+A->halo.to_receive->val[(A->halo.to_receive_n)-1]-A->halo.to_receive->val[0]);
+            }
+            
+            // -----------------------------------------------------
+            Vector::copyTo(x, Xtent_local->val[0]);
+            // -----------------------------------------------------
+                
+        } else {
+            // -----------------------------------------------------
+            Vector::copyTo(x, Xtent_local->val[0]);
+            // -----------------------------------------------------
+        }
 
-      if(nprocs > 1){
-          sync_solution(A->halo, A, x);
-      }
-      if(DETAILED_TIMING && ISMASTER){
-          TOTAL_RESTPRE_TIME += TIME::stop();
-      } 
+
+        if(DETAILED_TIMING && ISMASTER){
+            TOTAL_RESTPRE_TIME += TIME::stop();
+        } 
 
     }
   }else{
     assert(false);
   }
+  
+  POP_RANGE
 }
 
+
 #include <cuda_profiler_api.h>
-vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vector<vtype> *rhs, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, int precon, int max_iter, double rtol, int *num_iter){
+vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vector<vtype> *rhs, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, int precon, int max_iter, double rtol, int *num_iter, bool precondition_flag){
+  PUSH_RANGE(__func__,3)
+    
   _MPI_ENV;
   precon = 1;
   itype n = A->n;
-  vector<vtype> *v = Vector::init<vtype>(A->full_n, true, true);
 
+  Vectorinit_CNT
+  vector<vtype> *v = Vector::init<vtype>(A->n, true, true);
+    
   Vector::fillWithValue(v, 0.);
   vector<vtype> *w = NULL;
   vector<vtype> *r = NULL;
@@ -208,11 +340,17 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
       TIME::start();
   }
 
-  w = CSRm::CSRVector_product_adaptive_miniwarp(h->cusparse_h0, A, x, NULL, 1., 0.);
+  
+  if(nprocs > 1)
+    halo_sync(A->halo, A, x, true);
+        
+  w = CSRm::CSRVector_product_adaptive_miniwarp_new(h->cusparse_h0, A, x, NULL, 1., 0.);
+//   printf("---- w ----\n"); Vector::print<vtype>(w, -1, stdout);
+  
   if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();
       TOTAL_CSRVECTOR_TIME += TIME::stop();
-  } 
+  }
  
   if(DETAILED_TIMING && ISMASTER){
       TIME::start();
@@ -230,7 +368,7 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
   if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();
       TOTAL_NORMMPI_TIME += TIME::stop();
-  } 
+  }
 
   if(precon){
     /* apply preconditioner to w */
@@ -238,7 +376,17 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
     if(DETAILED_TIMING && ISMASTER){
       TIME::start();
     }
-    preconditionApply(h, bootamg_data, boot_amg, amg_cycle, r, v);
+
+    if (precondition_flag) {
+      preconditionApply(h, bootamg_data, boot_amg, amg_cycle, r, v);
+    } else {
+      Vector::copyTo(v, r);
+    }
+    if(nprocs > 1) {
+      for (int k=0; k<boot_amg->n_hrc; k++)
+        halo_sync(boot_amg->H_array[k]->A_array[0]->halo, boot_amg->H_array[k]->A_array[0], v, true);
+    }
+
     if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();
       TOTAL_PRECONDAPPLY_TIME += TIME::stop();
@@ -249,20 +397,26 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
       TIME::start();
   }
   // sync by smoother
-  CSRm::CSRVector_product_adaptive_miniwarp(h->cusparse_h0, A, v, w, 1., 0.);
+  pico_info.update(__FILE__, __LINE__+1);
+  CSRm::CSRVector_product_adaptive_miniwarp_new(h->cusparse_h0, A, v, w, 1., 0.);
+    
+//   PICO_PRINT( 
+//     fprintf(fp, "---- v ----\n"); Vector::print<vtype>(v, -1, fp);
+//     fprintf(fp, "---- w ----\n"); Vector::print<vtype>(w, -1, fp);
+//   )
+
   if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();
       TOTAL_CSRVECTOR_TIME += TIME::stop();
   } 
+
   if(DETAILED_TIMING && ISMASTER){
       TIME::start();
   }
   // get a local v
-  vector<vtype> *v_local = Vector::init<vtype>(n, false, true);
-  v_local->val = v->val + A->row_shift;
-
-  vtype alpha_local = Vector::dot(h->cublas_h, r, v_local);
-  vtype beta_local = Vector::dot(h->cublas_h, w, v_local);
+  vtype alpha_local = Vector::dot(h->cublas_h, r, v);
+  vtype beta_local = Vector::dot(h->cublas_h, w, v);
+  
 
   vtype alpha = 0., beta = 0.;
   CHECK_MPI( MPI_Allreduce(
@@ -282,16 +436,16 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
     MPI_SUM,
     MPI_COMM_WORLD
   ) );
-  free(v_local);
 
   vtype delta = beta;
   vtype theta = alpha / delta;
   vtype gamma = 0.;
 
-  Vector::axpyWithOff(h->cublas_h, v, x, theta, A->n, A->row_shift);
-
+  
+  Vector::axpy(h->cublas_h, v, x, theta);
+    
   Vector::axpy(h->cublas_h, w, r, -theta);
-
+  
   vtype l2_norm = Vector::norm_MPI(h->cublas_h, r);
   if (l2_norm <= rtol * delta0){
       *num_iter = 1;
@@ -311,46 +465,73 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
     int idx = iter % 2;
 
     if(idx == 0){
-      Vector::fillWithValueWithOff(v, 0.,A->n, A->row_shift);
+      Vector::fillWithValue(v, 0.);
 
+      
       if(precon){
-  	if(DETAILED_TIMING && ISMASTER){
-     	 TIME::start();
- 	}
-        preconditionApply(h, bootamg_data, boot_amg, amg_cycle, r, v);
         if(DETAILED_TIMING && ISMASTER){
-          cudaDeviceSynchronize();
-          TOTAL_PRECONDAPPLY_TIME += TIME::stop();
-        } 
+            TIME::start();
+        }
+        
+        if (precondition_flag) {
+          preconditionApply(h, bootamg_data, boot_amg, amg_cycle, r, v);
+        } else {
+          Vector::copyTo(v, r);
+        }
+        if(nprocs > 1) {
+          for (int k=0; k<boot_amg->n_hrc; k++)
+            halo_sync(boot_amg->H_array[k]->A_array[0]->halo, boot_amg->H_array[k]->A_array[0], v, true);
+        }
+
+        if(DETAILED_TIMING && ISMASTER){
+            cudaDeviceSynchronize();
+            TOTAL_PRECONDAPPLY_TIME += TIME::stop();
+        }
       }
 
       // A.local * v.full = w.local
       if(DETAILED_TIMING && ISMASTER){
-     	 TIME::start();
+        TIME::start();
       }
-      CSRm::CSRVector_product_adaptive_miniwarp(h->cusparse_h0, A, v, w, 1., 0.);
+      
+      
+      pico_info.update(__FILE__, __LINE__+1);
+      CSRm::CSRVector_product_adaptive_miniwarp_new(h->cusparse_h0, A, v, w, 1., 0.);
+      
+      
       if(DETAILED_TIMING && ISMASTER){
          cudaDeviceSynchronize();
-     	 TOTAL_CSRVECTOR_TIME += TIME::stop();
-      } 
-
+         TOTAL_CSRVECTOR_TIME += TIME::stop();
+      }
       // r.local w.local q.local v.full
       if(DETAILED_TIMING && ISMASTER){
     	 TIME::start();
       }
-      triple_innerproduct(r, w, q, v, &alpha, &beta, &gamma, A->row_shift);
+      
+      triple_innerproduct(r, w, q, v, &alpha, &beta, &gamma, 0);
+      
       if(DETAILED_TIMING && ISMASTER){
           cudaDeviceSynchronize();
           TOTAL_TRIPLEPROD_TIME += TIME::stop();
       } 
     }else{
-      Vector::fillWithValueWithOff(d, 0., A->n, A->row_shift);
-
+      Vector::fillWithValue(d, 0.);
+        
       if(precon){
         if(DETAILED_TIMING && ISMASTER){
      	  TIME::start();
         }
-        preconditionApply(h, bootamg_data, boot_amg, amg_cycle, r, d);
+        
+        if (precondition_flag) {
+          preconditionApply(h, bootamg_data, boot_amg, amg_cycle, r, d);
+        } else {
+          Vector::copyTo(d, r);
+        }
+        if(nprocs > 1) {
+          for (int k=0; k<boot_amg->n_hrc; k++)
+            halo_sync(boot_amg->H_array[k]->A_array[0]->halo, boot_amg->H_array[k]->A_array[0], d, true);
+        }
+
         if(DETAILED_TIMING && ISMASTER){
           cudaDeviceSynchronize();
           TOTAL_PRECONDAPPLY_TIME += TIME::stop();
@@ -361,16 +542,22 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
       if(DETAILED_TIMING && ISMASTER){
      	  TIME::start();
       }
-      CSRm::CSRVector_product_adaptive_miniwarp(h->cusparse_h0, A, d, q, 1., 0.);
+      
+      pico_info.update(__FILE__, __LINE__+1);
+      CSRm::CSRVector_product_adaptive_miniwarp_new(h->cusparse_h0, A, d, q, 1., 0.);
+      
+      
       if(DETAILED_TIMING && ISMASTER){
          cudaDeviceSynchronize();
      	 TOTAL_CSRVECTOR_TIME += TIME::stop();
-      } 
+      }
 
       if(DETAILED_TIMING && ISMASTER){
      	 TIME::start();
       }
-      triple_innerproduct(r, q, w, d, &alpha, &beta, &gamma, A->row_shift);
+      
+      triple_innerproduct(r, q, w, d, &alpha, &beta, &gamma, 0);
+      
       if(DETAILED_TIMING && ISMASTER){
           cudaDeviceSynchronize();
           TOTAL_TRIPLEPROD_TIME += TIME::stop();
@@ -386,10 +573,12 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
      	 TIME::start();
     }
     if(idx == 0){
-      double_merged_axpy(d, v, x, -theta, theta_2, A->n, A->row_shift);
+      double_merged_axpy(d, v, x, -theta, theta_2, d->n, 0);
+
       double_merged_axpy(q, w, r, -theta, -theta_2, r->n, 0);
     }else{
-      double_merged_axpy(v, d, x, -theta, theta_2, A->n, A->row_shift);
+      double_merged_axpy(v, d, x, -theta, theta_2, v->n, 0);
+
       double_merged_axpy(w, q, r, -theta, -theta_2, r->n, 0);
     }
     if(DETAILED_TIMING && ISMASTER){
@@ -412,12 +601,13 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
     iter++;
 
   }while(l2_norm > rtol * delta0 && iter < max_iter);
-
+  
+  
   assert( std::isfinite(l2_norm) );
 
   *num_iter = iter + 1;
 
-  if(precon){
+  if(precon && precondition_flag){
     FCG::freePreconditionContext();
   }
 
@@ -435,7 +625,8 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
     Eval::printMetaData("agg;doublemerged_time", TOTAL_DOUBLEMERGED_TIME/1000,1);
     Eval::printMetaData("agg;normpi2_time", TOTAL_NORMPI2_TIME/1000,1);
   }
-
+  
+  POP_RANGE
   return l2_norm;
 }
 

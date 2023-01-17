@@ -11,7 +11,7 @@
 #include <fstream>
 #include <cuda.h>
 #include <float.h>
-#include <mpi.h>
+// #include <mpi.h>
 
 #define DEFAULT_STREAM 0
 #define WARP_SIZE 32
@@ -36,7 +36,6 @@ namespace Eval{
   void printMetaData(const char* name, double value, int type);
 }
 
-
 #define CHECK_CUSPARSE(X) \
     { \
     cusparseStatus_t status = X;\
@@ -53,7 +52,7 @@ namespace Eval{
     if ( status != cudaSuccess ) { \
       const char *err_str = cudaGetErrorString(status);\
       fprintf( stderr, "[ERROR DEVICE] :\n\t%s; LINE: %d; FILE: %s\n", err_str, __LINE__, __FILE__);\
-	exit(1); \
+       exit(1); \
     } \
     }
 

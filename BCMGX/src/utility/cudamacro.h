@@ -37,11 +37,14 @@
 
 #endif
 
-#ifdef USE_NVTX
-#include "nvToolsExt.h"
+#if defined(USE_NVTX)
+#include <nvToolsExt.h>
 
+#if !defined(INITIALIZED_NVTX)
+#define INITIALIZED_NVTX
 const uint32_t colors[] = { 0xff00ff00, 0xff0000ff, 0xffffff00, 0xffff00ff, 0xff00ffff, 0xffff0000, 0xffffffff };
 const int num_colors = sizeof(colors)/sizeof(uint32_t);
+#endif
 
 #define PUSH_RANGE(name,cid) { \
     int color_id = cid; \
@@ -61,6 +64,8 @@ const int num_colors = sizeof(colors)/sizeof(uint32_t);
 #define POP_RANGE
 #endif
 
+#include "utility/setting.h"
+
 extern itype *iPtemp1;
 extern vtype *vPtemp1;
 extern itype *iAtemp1;
@@ -68,4 +73,21 @@ extern vtype *vAtemp1;
 extern itype *idevtemp1;
 extern itype *idevtemp2;
 extern vtype *vdevtemp1;
-
+// ------------ TEST --------------
+extern itype * dev_rcvprow_stat;
+extern vtype * completedP_stat_val;
+extern itype * completedP_stat_col;
+extern itype * completedP_stat_row;
+// ------------ AH glob -----------
+extern itype * AH_glob_row;
+extern itype * AH_glob_col;
+extern vtype * AH_glob_val;
+// --------------------------------
+extern int * buffer_4_getmct;
+extern int sizeof_buffer_4_getmct;
+extern unsigned int * idx_4shrink;
+extern bool alloced_idx;
+// --------- cuCompactor ---------
+extern int * glob_d_BlocksCount;
+extern int * glob_d_BlocksOffset;
+// --------------------------------

@@ -1,5 +1,5 @@
 #include <cusparse_v2.h>
-#include "spmspmMGPU/csrseg.h"
+#include "prec_setup/spmspmMGPU/csrseg.h"
 
 #ifdef FLOAT
 typedef float real;
@@ -167,7 +167,7 @@ void spgemm_kernel_cu_csr(sfCSR *a, sfCSR *b, sfCSR *c,
 void spgemm_cu_csr(sfCSR *a, sfCSR *b, sfCSR *c);
 void check_spgemm_answer(sfCSR c, sfCSR ans);
 void spgemm_kernel_hash(sfCSR *a, sfCSR *b, sfCSR *c);
-void spgemm_csrseg_kernel_hash(sfCSR *a, sfCSR *b, sfCSR *c, csrlocinfo *);
+void spgemm_csrseg_kernel_hash(sfCSR *a, sfCSR *b, sfCSR *c, csrlocinfo *, bool);
 
 
 

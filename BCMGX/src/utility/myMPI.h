@@ -11,5 +11,23 @@
 	exit(1); \
     } \
   }
+  
+// --------------- PICO ------------------
+
+#define MPI_CHOICE( T, P ) \
+    {\
+        if(ISMASTER) { \
+            printf(T); \
+            fflush(stdout); \
+            scanf("%d", &P); \
+        } \
+        MPI_Barrier(MPI_COMM_WORLD); \
+        CHECK_MPI( \
+            MPI_Bcast(&P, sizeof(int), MPI_BYTE, 0, MPI_COMM_WORLD) \
+        ); \
+        MPI_Barrier(MPI_COMM_WORLD); \
+    }
+
+// ---------------------------------------
 
 void StartMpi(int *id, int *np, int *argc, char ***argv);

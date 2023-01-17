@@ -1,4 +1,4 @@
-#define BLOCKSIZE 1024
+#define BLOCKSIZE 512 // 1024
 // Matrix's value type
 #define vtype double
 // Matrix's index type

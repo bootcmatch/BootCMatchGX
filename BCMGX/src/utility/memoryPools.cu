@@ -1,6 +1,8 @@
 #define global_pools 0
 #define local_pools 3
 
+#include "utility/function_cnt.h"
+
 namespace MemoryPool{
 
     void **local;
@@ -11,12 +13,14 @@ namespace MemoryPool{
       CHECK_HOST(MemoryPool::local);
 
       for(int i=0; i<local_pools; i++){
+        cudaMalloc_CNT
         CHECK_DEVICE( cudaMalloc(&MemoryPool::local[i], sizeof(vtype) * n) );
       }
 
       MemoryPool::global = (void**) malloc(sizeof(void*)*global_pools);
       CHECK_HOST(MemoryPool::local);
       for(int i=0; i<global_pools; i++){
+        cudaMalloc_CNT
         CHECK_DEVICE( cudaMalloc(&MemoryPool::global[i], sizeof(vtype) * full_n) );
       }
 

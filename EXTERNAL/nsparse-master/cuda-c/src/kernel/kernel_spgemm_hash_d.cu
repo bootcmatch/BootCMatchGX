@@ -26,27 +26,75 @@
 #include <nsparse.h>
 #include <nsparse_asm.h>
 
+#include "../../BCMGX/src/basic_kernel/custom_cudamalloc/custom_cudamalloc.h"
+
+#define NOMPI
+#include "../../BCMGX/src/utility/function_cnt.h"
+#undef NOMPI
+
 /* SpGEMM Specific Parameters */
 #define HASH_SCAL 107 // Set disjoint number to COMP_SH_SIZE
 #define ONSTREAM
 #define SHFLMASK 0xFFFFFFFF
 #define DBINFO binfo->fr, binfo->lr, binfo->row, binfo->col
 
+
+sfBIN global_bin;
+
 void init_bin(sfBIN *bin, int M)
 {
+    static int global_bin_stream_flag = 0;
+    static int global_bin_static_M = 0;
+    
     int i;
-    bin->stream = (cudaStream_t *)malloc(sizeof(cudaStream_t) * BIN_NUM);
+    // -------------------------------
+//     bin->stream = (cudaStream_t *)malloc(sizeof(cudaStream_t) * BIN_NUM);
+    // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    if (global_bin_stream_flag == 0)
+        bin->stream = (cudaStream_t *)malloc(sizeof(cudaStream_t) * BIN_NUM);
+    // -------------------------------
+    
     for (i = 0; i < BIN_NUM; i++) {
         cudaStreamCreate(&(bin->stream[i]));
     }
   
-    bin->bin_size = (int *)malloc(sizeof(int) * BIN_NUM);
-    bin->bin_offset = (int *)malloc(sizeof(int) * BIN_NUM);
-    checkCudaErrors(cudaMalloc((void **)&(bin->d_row_perm), sizeof(int) * M));
-    checkCudaErrors(cudaMalloc((void **)&(bin->d_row_nz), sizeof(int) * (M + 1)));
-    checkCudaErrors(cudaMalloc((void **)&(bin->d_max), sizeof(int)));
-    checkCudaErrors(cudaMalloc((void **)&(bin->d_bin_size), sizeof(int) * BIN_NUM));
-    checkCudaErrors(cudaMalloc((void **)&(bin->d_bin_offset), sizeof(int) * BIN_NUM));
+    // -------------------------------------------------------------------------------
+//     bin->bin_size = (int *)malloc(sizeof(int) * BIN_NUM);
+//     bin->bin_offset = (int *)malloc(sizeof(int) * BIN_NUM);
+//     cudaMalloc_CNT
+//     checkCudaErrors(cudaMalloc((void **)&(bin->d_row_perm), sizeof(int) * M));
+//     cudaMalloc_CNT
+//     checkCudaErrors(cudaMalloc((void **)&(bin->d_row_nz), sizeof(int) * (M + 1)));
+//     cudaMalloc_CNT
+//     checkCudaErrors(cudaMalloc((void **)&(bin->d_max), sizeof(int)));
+//     cudaMalloc_CNT
+//     checkCudaErrors(cudaMalloc((void **)&(bin->d_bin_size), sizeof(int) * BIN_NUM));
+//     cudaMalloc_CNT
+//     checkCudaErrors(cudaMalloc((void **)&(bin->d_bin_offset), sizeof(int) * BIN_NUM));
+    // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    if (global_bin_stream_flag == 0) { 
+        bin->bin_size = (int *)malloc(sizeof(int) * BIN_NUM);
+        bin->bin_offset = (int *)malloc(sizeof(int) * BIN_NUM);
+        cudaMalloc_CNT
+        checkCudaErrors(cudaMalloc((void **)&(bin->d_max), sizeof(int)));
+        cudaMalloc_CNT
+        checkCudaErrors(cudaMalloc((void **)&(bin->d_bin_size), sizeof(int) * BIN_NUM));
+        cudaMalloc_CNT
+        checkCudaErrors(cudaMalloc((void **)&(bin->d_bin_offset), sizeof(int) * BIN_NUM));
+        global_bin_stream_flag = 1;
+    }
+    if (M > global_bin_static_M) {
+        if (global_bin_static_M > 0) {
+            cudaFree(bin->d_row_perm);
+            cudaFree(bin->d_row_nz);
+        }
+        cudaMalloc_CNT
+        checkCudaErrors(cudaMalloc((void **)&(bin->d_row_perm), sizeof(int) * M));
+        cudaMalloc_CNT
+        checkCudaErrors(cudaMalloc((void **)&(bin->d_row_nz), sizeof(int) * (M + 1)));
+        global_bin_static_M = M;
+    }
+    // -------------------------------------------------------------------------------
     i = 0;
     bin->max_intprod = 0;
     bin->max_nz = 0;
@@ -1170,46 +1218,65 @@ void calculate_value_col_bin(int *d_arpt, int *d_acol, real *d_aval,
                              sfBIN *bin,
                              int M);
   
-void spgemm_csrseg_kernel_hash(sfCSR *a, sfCSR *b, sfCSR *c, csrlocinfo *binfo)
+void spgemm_csrseg_kernel_hash(sfCSR *a, sfCSR *b, sfCSR *c, csrlocinfo *binfo, bool used_by_solver)
 {
   
     int M;
-    sfBIN bin;
-  
+    
+    // ------------------------    
+//     sfBIN bin;
+    // >>>>>>>>>>>>>>>>>>>>>>>>
+    sfBIN *bin = &(global_bin);  
+    // for the whole function: &bin >>>> bin
+    // ------------------------
+    
     M = a->M;
     c->M = M;
     c->N = b->N;
   
     /* Initialize bin */
-    init_bin(&bin, M);
+    init_bin(bin, M);
 
     /* Set max bin */
-    set_max_bin(a->d_rpt, a->d_col, b->d_rpt, binfo,  &bin, M);
+    set_max_bin(a->d_rpt, a->d_col, b->d_rpt, binfo,  bin, M);
   
-    checkCudaErrors(cudaMalloc((void **)&(c->d_rpt), sizeof(int) * (M + 1)));
-
+    // ------------------------ custom cudaMalloc ------------------------------
+//     cudaMalloc_CNT
+//     checkCudaErrors(cudaMalloc((void **)&(c->d_rpt), sizeof(int) * (M + 1)));
+    // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    c->d_rpt = CustomCudaMalloc::alloc_itype(M + 1, (used_by_solver ? 0 : 2));
+    // -------------------------------------------------------------------------
+    
     /* Count nz of C */
     set_row_nnz(a->d_rpt, a->d_col,
                 b->d_rpt, b->d_col, binfo,
                 c->d_rpt,
-                &bin,
+                bin,
                 M,
                 &(c->nnz));
 
     /* Set bin */
-    set_min_bin(&bin, M);
+    set_min_bin(bin, M);
   
-    checkCudaErrors(cudaMalloc((void **)&(c->d_col), sizeof(int) * c->nnz));
-    checkCudaErrors(cudaMalloc((void **)&(c->d_val), sizeof(real) * c->nnz));
+    // ------------------------ custom cudaMalloc ------------------------------
+//     cudaMalloc_CNT
+//     checkCudaErrors(cudaMalloc((void **)&(c->d_col), sizeof(int) * c->nnz));
+//     cudaMalloc_CNT
+//     checkCudaErrors(cudaMalloc((void **)&(c->d_val), sizeof(real) * c->nnz));
+    // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    c->d_col = CustomCudaMalloc::alloc_itype(c->nnz, (used_by_solver ? 0 : 2));
+    c->d_val = CustomCudaMalloc::alloc_vtype(c->nnz, (used_by_solver ? 0 : 2));
+    // -------------------------------------------------------------------------
   
     /* Calculating value of C */
     calculate_value_col_bin(a->d_rpt, a->d_col, a->d_val,
                             b->d_rpt, b->d_col, b->d_val, binfo,
                             c->d_rpt, c->d_col, c->d_val,
-                            &bin,
+                            bin,
                             M);
-
-    release_bin(bin);
+    // -----------------
+//     release_bin(bin);
+    // -----------------
 }
 
 
@@ -1282,8 +1349,10 @@ void set_row_nnz(int *d_arpt, int *d_acol,
             	    int fail_count;
             	    int *d_fail_count, *d_fail_perm;
             	    fail_count = 0;
+                    cudaMalloc_CNT
             	    checkCudaErrors(cudaMalloc((void **)&d_fail_count, sizeof(int)));
-            	    checkCudaErrors(cudaMalloc((void **)&d_fail_perm, sizeof(int) * bin->bin_size[i]));
+            	    cudaMalloc_CNT
+                    checkCudaErrors(cudaMalloc((void **)&d_fail_perm, sizeof(int) * bin->bin_size[i]));
             	    cudaMemcpy(d_fail_count, &fail_count, sizeof(int), cudaMemcpyHostToDevice);
             	    BS = 1024;
             	    GS = bin->bin_size[i];
@@ -1297,6 +1366,7 @@ void set_row_nnz(int *d_arpt, int *d_acol,
               	        int max_row_nz = bin->max_intprod;
             	        size_t table_size = (size_t)max_row_nz * fail_count;
             	        int *d_check;
+                        cudaMalloc_CNT
             	        checkCudaErrors(cudaMalloc((void **)&(d_check), sizeof(int) * table_size));
             	        BS = 1024;
             	        GS = div_round_up(table_size, BS);
@@ -1403,8 +1473,10 @@ void calculate_value_col_bin(int *d_arpt, int *d_acol, real *d_aval,
 	    int table_size = max_row_nz * bin->bin_size[i];
 	    int *d_check;
 	    real *d_value;
+        cudaMalloc_CNT
 	    checkCudaErrors(cudaMalloc((void **)&(d_check), sizeof(int) * table_size));
-	    checkCudaErrors(cudaMalloc((void **)&(d_value), sizeof(real) * table_size));
+	    cudaMalloc_CNT
+        checkCudaErrors(cudaMalloc((void **)&(d_value), sizeof(real) * table_size));
 	    BS = 1024;
 	    GS = div_round_up(table_size, BS);
 	    init_check<<<GS, BS, 0, bin->stream[i]>>>(d_check, table_size);
