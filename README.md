@@ -32,14 +32,16 @@ make all
 The solver supports three different running modes, that can be selected as follows:
 
 ```sh
-Usage: bcmgx [--matrix <FILE_NAME> | --laplacian-3d <FILE_NAME> | --laplacian <SIZE>] --settings <FILE_NAME>
+Usage: sample_main [--matrix <FILE_NAME> | --laplacian-3d <FILE_NAME> | --laplacian <SIZE>] [--preconditioner <BOOL>] --settings <FILE_NAME>
+       
+       You can specify only one out of the three available options: --matrix, --laplacian-3d and --laplacian
 
-        You can specify only one out of the three available options: --matrix, --laplacian-3d and --laplacian
-
-        -m, --matrix <FILE_NAME>         Read the matrix from file <FILE_NAME> in "Matrix Market" format.
-        -l, --laplacian-3d <FILE_NAME>   Read generation parameters from file <FILE_NAME>.
-        -a, --laplacian <SIZE>           Generate a matrix whose size is <SIZE>^3.
-        -s, --settings <FILE_NAME>       Read settings from file <FILE_NAME>.
+	      -m, --matrix <FILE_NAME>         Read the matrix from file <FILE_NAME>.
+	      -l, --laplacian-3d <FILE_NAME>   Read generation parameters from file <FILE_NAME>.
+	      -a, --laplacian <SIZE>           Generate a matrix whose size is <SIZE>^3.
+	      -s, --settings <FILE_NAME>       Read settings from file <FILE_NAME>.
+	      -p, --preconditioner <BOOL>      If 0 the preconditioner will not be applied, otherwise it will be applied. If the parameter 
+	                                       is not passed on the command line the preconditioner will be applied.
 ```
 
 The directory *src/cfg_files* contains three examples of configuration files that can be used with the *--laplacian-3d* mode. Each file is named as *lap3d_{N}.cfg* where the N denotes the number of processes that you want to run. The directory *test_matrix* contains a matrix in the *Matrix Market* format that can be used with the *--matrix* mode. Finally the file *AMGsettings* contains an example of a configuration file that can be used for the *--settings* option. 
