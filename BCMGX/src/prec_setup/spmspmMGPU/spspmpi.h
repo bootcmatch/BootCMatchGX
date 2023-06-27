@@ -6,7 +6,6 @@
 
 #include "utility/utils.h"
 #include "utility/handles.h"
-#include "nsparse.h"
 #include "basic_kernel/matrix/CSR.h"
 #include <cuda_profiler_api.h>
 #include "prec_setup/spmspmMGPU/csrseg.h"

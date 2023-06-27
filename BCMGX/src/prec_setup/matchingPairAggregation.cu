@@ -174,7 +174,11 @@ void matchingPairAggregation(handles *h, CSR *A, vector<vtype> *w, CSR **_P, CSR
   _MPI_ENV;
   TIMER_DEF;
 
+ if(0) fprintf(stderr,"Task %d reached line %d in matchingPairAggregation (%s)\n",myid,__LINE__,__FILE__);
   vector<itype> *M = suitor(h, A, w);
+ if(0) fprintf(stderr,"Task %d reached line %d in matchingPairAggregation (%s)\n",myid,__LINE__,__FILE__);
+
+
   CSR *R, *P;
 
   // make P on GPU
@@ -184,6 +188,7 @@ void matchingPairAggregation(handles *h, CSR *A, vector<vtype> *w, CSR **_P, CSR
     TIMER_START;
   }	  
   P = makeP_GPU(A, M, w, used_by_solver);
+  
   if(DETAILED_TIMING && ISMASTER){
     cudaDeviceSynchronize();
 //     TOTAL_MAKE_P += TIME::stop();
@@ -191,8 +196,8 @@ void matchingPairAggregation(handles *h, CSR *A, vector<vtype> *w, CSR **_P, CSR
     TOTAL_MAKE_P += TIMER_ELAPSED;
   }
 
-  itype m_shifts[nprocs];
-  itype ms[nprocs];
+  gstype m_shifts[nprocs];
+  gstype ms[nprocs];
 
   //get colum numbers other process
   if(nprocs > 1){
@@ -200,15 +205,16 @@ void matchingPairAggregation(handles *h, CSR *A, vector<vtype> *w, CSR **_P, CSR
     CHECK_MPI(
       MPI_Allgather(
         &P->m,
-        sizeof(itype),
+        sizeof(gstype),
         MPI_BYTE,
-        &ms,
-        sizeof(itype),
+        ms,
+        sizeof(gstype),
         MPI_BYTE,
         MPI_COMM_WORLD
       )
     );
-    itype tot_m = 0;
+   if(0)  fprintf(stderr,"Task %d reached line %d in matchingPairAggregation (%s)\n",myid,__LINE__,__FILE__);
+    gstype tot_m = 0;
 
     for(int i=0; i<nprocs; i++){
       m_shifts[i] = tot_m;
@@ -223,6 +229,7 @@ void matchingPairAggregation(handles *h, CSR *A, vector<vtype> *w, CSR **_P, CSR
     //R->m = A->full_n;
     CSRm::shift_cols(R, P->row_shift);
     R->row_shift = m_shifts[myid];
+
     CSRm::shift_cols(P, m_shifts[myid]);
     P->m = tot_m;
     R->full_n = tot_m;
@@ -231,6 +238,7 @@ void matchingPairAggregation(handles *h, CSR *A, vector<vtype> *w, CSR **_P, CSR
     R = CSRm::T(h->cusparse_h0, P);
   }
 
+    if(0) fprintf(stderr,"Task %d reached line %d in matchingPairAggregation (%s)\n",myid,__LINE__,__FILE__);
     free(M);
 
     *_P = P;

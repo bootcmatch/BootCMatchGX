@@ -2,11 +2,13 @@ CC = nvcc
 NVCC_FLAG = -DOMPI_SKIP_MPICXX -std=c++14 
 GPU_ARCH = -arch=sm_70 -m64
 MPI_DIR=/usr/local
-CUB_PATH = ../EXTERNAL/nsparse-master/cub-1.7.4/cub
+#CUB_PATH = ../EXTERNAL/nsparse-master/cub-1.7.4/cub
+CUB_PATH = .
 NSPARSE_PATH = ../EXTERNAL/nsparse-master/cuda-c
 NSPARSE_GPU_ARCH = -arch=sm_70 -m64
 LIBS = -lcudart -lcusparse -lcublas -lcusolver -lcurand -L$(MPI_DIR)/lib -lmpi -lnvToolsExt
-INCLUDE = -Isrc  -I$(MPI_DIR)/include -I$(NSPARSE_PATH)/inc -I$(CUB_PATH)
+#INCLUDE = -Isrc  -I$(MPI_DIR)/include -I$(NSPARSE_PATH)/inc -I$(CUB_PATH)
+INCLUDE = -Isrc  -I$(MPI_DIR)/include -I$(NSPARSE_PATH)/inc
 OPT = -O3 -std=c++14 -DUSE_NVTX
 
 MAIN = sample_main.cu

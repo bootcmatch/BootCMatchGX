@@ -7,8 +7,6 @@
 #include <getopt.h>
 #include "basic_kernel/custom_cudamalloc/custom_cudamalloc.h"
 
-//#include <cuda_profiler_api.h>
-
 #define DIE CHECK_DEVICE(cudaDeviceSynchronize());MPI_Finalize();exit(0);
 
 #include "basic_kernel/matrix/scalar.h"
@@ -20,6 +18,8 @@
 #include "solver/bcmgx.h"
 #include <string>
 #include "utility/distribuite.h"
+#include "nsparse.h"
+
 
 #include "basic_kernel/halo_communication/extern2.h"   //PICO
 #include "utility/function_cnt.h"        //PICO
@@ -35,20 +35,20 @@ using namespace std;
 CSR* generateLocalLaplacian3D(itype n){
   _MPI_ENV;
   // global number of rows
-  itype N = n * n * n;
+  gstype N = ((gstype)n) * ((gstype)n) * ((gstype)n);
   /* Each processor knows only of its own rows - the range is denoted by ilower
      and upper.  Here we partition the rows. We account for the fact that
      N may not divide evenly by the number of processors. */
-  itype local_size = N / nprocs;
+  stype local_size = N / ((gstype)nprocs);
   // local row start
-  itype ilower = local_size * myid;
+  gstype ilower = ((gstype)local_size) * ((gstype)myid);
   // local row end
-  itype iupper = local_size*(myid+1);
+  gstype iupper = ((gstype)local_size)*((gstype)(myid+1));
   // last takes all
 
   if(myid == nprocs-1){
     iupper = N;
-    local_size = N - local_size*(myid);
+    local_size = N - ((gstype)local_size)*((gstype)myid);
   }
 
   assert(local_size == (iupper-ilower));
@@ -57,48 +57,48 @@ CSR* generateLocalLaplacian3D(itype n){
   vtype values[7];
   itype cols[7];
   itype NNZ = 0;
-  itype I = 0;
+  gstype I = 0;
 
-  for(itype i = ilower; i < iupper; i++, I++){
+  for(gsstype i = ilower; i < iupper; i++, I++){
     itype nnz = 0;
-    itype k=floor(i/(n*n));
+    gstype k=floor(i/(((gstype)n)*((gstype)n)));
       /* The left identity block:position i-n*n */
       if ((i-n*n)>=0){
-        cols[nnz] = i-n*n;
+        cols[nnz] = (i-((gstype)n)*((gstype)n))-ilower;
         values[nnz] = -1.0;
         nnz++;
       }
       /* The left identity block:position i-n */
-      if (i>=n+k*(n*n) && i < (k+1)*(n*n)){
-        cols[nnz] = i-n;
+      if (i>=n+k*((gstype)n)*((gstype)n) && i < (k+1)*((gstype)n)*((gstype)n)){
+        cols[nnz] = i-n-ilower;
         values[nnz] = -1.0;
         nnz++;
       }
       /* The left -1: position i-1 */
       if (i%n){
-        cols[nnz] = i-1;
+        cols[nnz] = i-1-ilower;
         values[nnz] = -1.0;
         nnz++;
       }
       /* Set the diagonal: position i */
-      cols[nnz] = i;
+      cols[nnz] = i-ilower;
       values[nnz] = 6.0;
       nnz++;
       /* The right -1: position i+1 */
       if ((i+1)%n){
-        cols[nnz] = i+1;
+        cols[nnz] = i+1-ilower;
         values[nnz] = -1.0;
         nnz++;
       }
       /* The right identity block:position i+n */
-      if(i>=k*(n*n) && i < (k+1)*(n*n)-n){
-        cols[nnz] = i+n;
+      if(i>=k*((gstype)n)*((gstype)n) && i < (k+1)*(((gstype)n)*((gstype)n))-(gstype)n){
+        cols[nnz] = i+(gstype)n-ilower;
         values[nnz] = -1.0;
         nnz++;
       }
       /* The right identity block:position i+n*n */
-      if ((i+n*n)< N){
-        cols[nnz] = i+n*n;
+      if ((i+((gstype)n)*((gstype)n))< N){
+        cols[nnz] = i+((gstype)n)*((gstype)n)-ilower;
         values[nnz] = -1.0;
         nnz++;
       }
@@ -181,16 +181,17 @@ void bubbleSort(itype arr[], vtype val[], itype n) {
             swap(&arr[j], &arr[j+1], &val[j], &val[j+1]); 
 }
  
-int internal_index(int gi, int gj, int gk, int nx, int ny, int nz, int P, int Q, int R){
-    int i = gi % nx; // Position in x
-    int j = gj % ny; // Position in y
-    int k = gk % nz; // Position in z
+long int internal_index(int gi, int gj, int gk, int nx, int ny, int nz, int P, int Q, int R){
+    gstype i = gi % nx; // Position in x
+    gstype j = gj % ny; // Position in y
+    gstype k = gk % nz; // Position in z
 
-    int p = gi / nx; // Position in x direction
-    int q = gj / ny; // Position in y
-    int r = gk / nz; // Position in z
+    gstype p = gi / nx; // Position in x direction
+    gstype q = gj / ny; // Position in y
+    gstype r = gk / nz; // Position in z
 
-    return (r*P*Q + q*P + p)*nx*ny*nz + (k*nx*ny + j*nx + i);
+    return (r*((gstype)P)*((gstype)Q) + q*((gstype)P) + p)*((gstype)nx)*((gstype)ny)*((gstype)nz) +
+    	   (k*((gstype)nx)*((gstype)ny) + j*((gstype)nx) + i);
 }
 
 CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype Q, itype R){
@@ -203,16 +204,16 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
   int coords[3] = {0, 0, 0};
   int my3id;
   // global number of rows
-  itype N = nx * ny * nz * P * Q * R;
+  gstype N = ((gstype)nx) * ((gstype)ny) * ((gstype)nz) * ((gstype)P) * ((gstype)Q) * ((gstype)R);
 
   itype local_size = nx * ny * nz;
-  int nx_glob = nx*P;
-  int ny_glob = ny*Q;
-  int nz_glob = nz*R;
+  gstype nx_glob = nx*P;
+  gstype ny_glob = ny*Q;
+  gstype nz_glob = nz*R;
 
-  int num_rows = nx_glob*ny_glob*nz_glob;
-  int num_nonzeros = num_rows*7; // Ignoring any boundary, 7 nnz per row
-  int num_substract = 0;
+  long unsigned int num_rows = nx_glob*ny_glob*nz_glob;
+  long unsigned int num_nonzeros = num_rows*7; // Ignoring any boundary, 7 nnz per row
+  long unsigned int num_substract = 0;
 
   num_substract += ny_glob*nz_glob;
   num_substract += ny_glob*nz_glob;
@@ -236,7 +237,7 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
   int p = coords[0];
   int q = coords[1];
   int r = coords[2]; 
-  itype ilower=(r*Q*P +q*P + p)*local_size;
+  gstype ilower=(((gstype)r)*((gstype)Q)*((gstype)P) +((gstype)q)*((gstype)P) + ((gstype)p))*((gstype)local_size);
   CSR *Alocal = CSRm::init(local_size, N, (local_size*7), true, false, false, N, ilower);
 // alloc COO 
   itype * Arow = (itype*) malloc( sizeof(itype *) * (local_size*7) );
@@ -259,7 +260,7 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
 
            //Diagonal term
            Arow[nz_count] = count;
-           Acol[nz_count] = count+ ilower;
+           Acol[nz_count] = count+ (ilower - ilower);
            Aval[nz_count] = 6.;
            nnz++;
            nz_count++;
@@ -271,7 +272,7 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
            else
            {
               Arow[nz_count] = count;
-              Acol[nz_count] = internal_index(gi-1,gj,gk,nx,ny,nz,P,Q,R);
+              Acol[nz_count] = internal_index(gi-1,gj,gk,nx,ny,nz,P,Q,R)-ilower;
               Aval[nz_count] = -1.;
               nnz++;
               nz_count++;
@@ -282,7 +283,7 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
            else
            {
               Arow[nz_count] = count;
-              Acol[nz_count] = internal_index(gi+1,gj,gk,nx,ny,nz,P,Q,R);
+              Acol[nz_count] = internal_index(gi+1,gj,gk,nx,ny,nz,P,Q,R)-ilower;
               Aval[nz_count] = -1.;
               nnz++;
               nz_count++;
@@ -293,7 +294,7 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
            else
            {
               Arow[nz_count] = count;
-              Acol[nz_count] = internal_index(gi,gj-1,gk,nx,ny,nz,P,Q,R);
+              Acol[nz_count] = internal_index(gi,gj-1,gk,nx,ny,nz,P,Q,R)-ilower;
               Aval[nz_count] = -1.;
               nnz++;
               nz_count++;
@@ -304,7 +305,7 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
            else
            {
               Arow[nz_count] = count;
-              Acol[nz_count] = internal_index(gi,gj+1,gk,nx,ny,nz,P,Q,R);
+              Acol[nz_count] = internal_index(gi,gj+1,gk,nx,ny,nz,P,Q,R)-ilower;
               Aval[nz_count] = -1.;
               nnz++;
               nz_count++;
@@ -315,7 +316,7 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
            else
            {
               Arow[nz_count] = count;
-              Acol[nz_count] = internal_index(gi,gj,gk-1,nx,ny,nz,P,Q,R);
+              Acol[nz_count] = internal_index(gi,gj,gk-1,nx,ny,nz,P,Q,R)-ilower;
               Aval[nz_count] = -1.;
               nnz++;
               nz_count++;
@@ -326,7 +327,7 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
            else
            {
               Arow[nz_count] = count;
-              Acol[nz_count] = internal_index(gi,gj,gk+1,nx,ny,nz,P,Q,R);
+              Acol[nz_count] = internal_index(gi,gj,gk+1,nx,ny,nz,P,Q,R)-ilower;
               Aval[nz_count] = -1.;
               nnz++;
               nz_count++;
@@ -412,21 +413,41 @@ int * read_laplacian_file(const char *file_name){
     return lap_3d_parm;
 }
 
-// functionCall_cnt function_cnt;
-// #if CUDAMALLOCCNTON
-functionCall_cnt cudamalloc_cnt;
-// #endif
+void check_and_fix_order(CSR * A) {
 
-#define USAGE "\nUsage: sample_main [--matrix <FILE_NAME> | --laplacian-3d <FILE_NAME> | --laplacian <SIZE>] [--preconditioner <BOOL>] --settings <FILE_NAME>\n\n"\
+  itype * Arow = A->row;
+  itype * Acol = A->col;
+  vtype * Aval = A->val;
+  itype prev;
+  int wrongo;
+  for(int i=0; i<A->n; i++){
+      wrongo=0;
+      prev=A->col[Arow[i]];
+      for (int j = Arow[i]+1; j< Arow[i+1]; j++) {
+           if (A->col[j] < prev) {
+	       wrongo=1;
+	       break;
+           } else {
+	       prev=A->col[j];
+	   }
+      }
+      if(wrongo) {
+           bubbleSort(&Acol[Arow[i]], &Aval[Arow[i]],(Arow[i+1]-Arow[i])); 
+      }
+  }
+
+     
+}
+
+#define USAGE "\nUsage: sample_main [--matrix <FILE_NAME> | --laplacian <SIZE>] [--preconditioner <BOOL>] --settings <FILE_NAME>\n\n"\
                "\tYou can specify only one out of the three available options: --matrix, --laplacian-3d and --laplacian\n\n"\
 	           "\t-m, --matrix <FILE_NAME>         Read the matrix from file <FILE_NAME>.\n"\
-	           "\t-l, --laplacian-3d <FILE_NAME>   Read generation parameters from file <FILE_NAME>.\n"\
 		       "\t-a, --laplacian <SIZE>           Generate a matrix whose size is <SIZE>^3.\n"\
 	           "\t-s, --settings <FILE_NAME>       Read settings from file <FILE_NAME>.\n"\
                "\t-p, --preconditioner <BOOL>      If 0 the preconditioner will not be applied, otherwise it will be applied. If the parameter \n"\
 	           "\t                                 is not passed on the command line the preconditioner will be applied.\n\n"
 
-#define DEFAULTSCALENNZMISS 4
+#define DEFAULTSCALENNZMISS 1024
 int xsize=0;
 double *xvalstat=NULL;
 int scalennzmiss=DEFAULTSCALENNZMISS;
@@ -435,29 +456,8 @@ extern vtype *min_max;
 void release_bin(sfBIN bin);
 extern sfBIN global_bin;
 
-// #include "utility/utils.h"
-// __global__
-// void test_vector(itype* v, int n){
-//     itype tid = blockDim.x * blockIdx.x + threadIdx.x;
-//     
-//     if (tid < n)
-//         v[tid] = tid;
-// }
-// 
-// __global__
-// void test_vector_vtype(vtype* v, int n){
-//     itype tid = blockDim.x * blockIdx.x + threadIdx.x;
-//     
-//     if (tid < n)
-//         v[tid] = ((vtype)tid/2);
-// }
-
 int main(int argc, char **argv){
     PUSH_RANGE(__func__,1)
-//   function_cnt.init(10);
-#if CUDAMALLOCCNTON
-    cudamalloc_cnt.init(40);
-#endif
     
   enum opts {MTX, LAP_3D, LAP, NONE} opt = NONE;
   char *mtx_file = NULL;
@@ -481,22 +481,22 @@ int main(int argc, char **argv){
     switch (ch){
       case 'm':
         mtx_file = strdup(optarg);
-	opt = MTX;
-	break;		    
+	    opt = MTX;
+	    break;		    
       case 'l':
         lap_3d_file = strdup(optarg);
-	opt = LAP_3D;
-	break;		    
+	    opt = LAP_3D;
+	    break;		    
       case 'a':
         n = atoi(optarg);
-	opt = LAP;
-	break;		    
+	    opt = LAP;
+   	    break;		    
       case 's':
         settings_file = strdup(optarg);
-	break;
-    case 'p':
+	    break;
+      case 'p':
         precondition_flag = atoi(optarg) ? true : false;
-	break;
+	    break;
       case 'h':
       default:
         printf(USAGE);
@@ -511,22 +511,7 @@ int main(int argc, char **argv){
   // setup AMG:
   int myid, nprocs, device_id;
   StartMpi(&myid, &nprocs, &argc, &argv);
-  
-  // ------------------ For CUDA-GDB --------------------
-//   {
-//         int i = 0;
-//         char host[256];
-//         printf("PID %d on node %s (of %d) is ready for attach\n", getpid(), host, nprocs);
-//         fflush(stdout);
-//         if(ISMASTER) {
-//             printf("Ultimare operazioni per CUDA-GDB, oppure continuare inserendo un qualsiasi numero:\n");
-//             fflush(stdout);
-//             scanf("%d", &i);
-//         }
-//         MPI_Barrier(MPI_COMM_WORLD);
-//   }
-  // ----------------------------------------------------
-  
+ 
   if(getenv("SCALENNZMISSING")) {
      scalennzmiss=atoi(getenv("SCALENNZMISSING"));
   } 
@@ -538,11 +523,15 @@ int main(int argc, char **argv){
   CSR *Alocal;
   vector<vtype> *rhs;
   params p = AMG::Params::initFromFile(settings_file);
+  if (p.error != 0){
+     return -1;
+  }
 
   if ( opt == MTX ){ // The master reads the matrix and distributes it.
     CSR *Alocal_master = NULL;
     if(ISMASTER){
       Alocal_master = readMatrixFromFile(mtx_file,0,false);
+      check_and_fix_order(Alocal_master);
     }
     Alocal = split_MatrixMPI(Alocal_master);
     if (ISMASTER){
@@ -563,6 +552,7 @@ int main(int argc, char **argv){
     }else if( opt == LAP){
       Alocal_host = generateLocalLaplacian3D(n);
     }
+    check_and_fix_order(Alocal_host);    
     Alocal = CSRm::copyToDevice(Alocal_host);
     // Write local matrix
     //char fname[256];
@@ -570,9 +560,9 @@ int main(int argc, char **argv){
     //CSRMatrixPrintMM(Alocal_host, fname);
     CSRm::free(Alocal_host);
   }
-
+  Alocal->col_shifted=-Alocal->row_shift;
   Vectorinit_CNT
-  rhs = Vector::init<vtype>(Alocal->n, true, true);  // BUG? Alocal->n  ===>  Alocal->m/nprocs
+  rhs = Vector::init<vtype>(Alocal->n, true, true); 
   Vector::fillWithValue(rhs, 1.);
 
   if(ISMASTER){
@@ -588,26 +578,21 @@ int main(int argc, char **argv){
     printf("DONE!\n");
   }
   
-  if (xsize > 0)
+  if (xsize > 0){
     cudaFree(xvalstat);
-  if (precondition_flag)
-    release_bin(global_bin);
- 
-//   function_cnt.print();
-  
-//  if( myid == 1){
-//     cudaProfilerStop();
-//  }
-  if(d_temp_storage_max_min) {
-    cudaFree(d_temp_storage_max_min);
-  }
-  if(min_max) {
-    cudaFree(min_max);
   }
 
-#if CUDAMALLOCCNTON
-  cudamalloc_cnt.print();
-#endif
+  if (precondition_flag){
+  release_bin(global_bin);
+  }
+ 
+  if(d_temp_storage_max_min) {
+    MY_CUDA_CHECK( cudaFree(d_temp_storage_max_min) );
+  }
+  if(min_max) {
+    MY_CUDA_CHECK( cudaFree(min_max) );
+  }
+
   
   MPI_Finalize();
   POP_RANGE

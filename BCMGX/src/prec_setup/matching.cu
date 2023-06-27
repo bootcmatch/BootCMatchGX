@@ -43,7 +43,7 @@ void _write_T_warp(itype n, int MINI_WARP_SIZE, vtype *A_val, itype *A_col, ityp
   itype j_stop = A_row[warp+1];
 
   for(int j=A_row[warp]+lane; j<j_stop; j+=MINI_WARP_SIZE){
-    itype c = A_col[j] - shift;
+    itype c = A_col[j] /* - shift */;
 
     if(c < 0 || c>=n){
       continue;
@@ -55,7 +55,7 @@ void _write_T_warp(itype n, int MINI_WARP_SIZE, vtype *A_val, itype *A_col, ityp
 
     int nc = A_row[c+1] - A_row[c];
 
-    int jj=binsearch(A_col+A_row[c], nc, warp+shift);
+    int jj=binsearch(A_col+A_row[c], nc, warp /* +shift */);
 
     t = A_val[jj+A_row[c]];
     A_val[j] = t;
@@ -78,24 +78,23 @@ void _makeAH_warp(itype n, int AH_MINI_WARP_SIZE, vtype *A_val, itype *A_col, it
   for(int j=A_row[warp]+lane; j<j_stop; j+=AH_MINI_WARP_SIZE){
     itype c = A_col[j];
 
-    if(c < row_shift || c >= row_shift+n){
-      itype offset = c > (warp + row_shift) ? warp + 1  : warp;
+    if(c < 0 /* row_shift */ || c >= /* row_shift+ */ n){
+      itype offset = c > (warp /* + row_shift */) ? warp + 1  : warp;
       AH_val[j - offset] = 99999.;
       AH_col[j - offset] = c;
-
     }else{
 
-      if(c != warp + row_shift){
+      if(c != warp /* + row_shift */){
         vtype a = A_val[j];
-        itype offset = c > (warp + row_shift) ? warp + 1  : warp;
+        itype offset = c > (warp /* + row_shift */) ? warp + 1  : warp;
         AH_col[j - offset] = c;
-
-        vtype norm = c > warp + row_shift? C[warp] + C[c-row_shift] : C[c-row_shift] + C[warp];
+        vtype norm = c > (warp /* + row_shift */) ? C[warp] + C[c /* -row_shift */] : C[c /* -row_shift */] + C[warp];
         if(norm > DBL_EPSILON){
-          vtype w_temp = c > warp + row_shift? w[warp] * w[c-row_shift] : w[c-row_shift] * w[warp];
+          vtype w_temp = c > (warp /* + row_shift */)? w[warp] * w[c /* -row_shift */] : w[c /* -row_shift */] * w[warp];
           AH_val[j - offset] = 1. - ( (2. * a * w_temp) / norm);
-        }else
+        }else {
           AH_val[j - offset] = DBL_EPSILON;
+	}
       }
     }
   }
@@ -127,8 +126,8 @@ void _makeC(stype n, vtype *val, itype *col, itype *row, vtype *w, vtype *C, ity
     itype c = col[j];
 
     // if is a diagonal element
-    if(c == r+row_shift){
-      C[r] = val[j] * pow(w[r], 2);
+    if(c == r/* +row_shift */){
+      C[r] = val[j]*w[r]*w[r] /* pow(w[r], 2) */;
       break;
     }
   }
@@ -150,7 +149,7 @@ CSR* makeAH(CSR *A, vector<vtype> *w){
   gridblock gb = gb1d(n, BLOCKSIZE, false);
   // only local access to w, c must be local but with shift
   _makeC<<<gb.g, gb.b>>>(n, A->val, A->col, A->row, w->val, C->val, A->row_shift);
-
+  
   //Diagonal MUST be non-empty!
   // ----------------------------------------- custom cudaMalloc -------------------------------------------
 //   CSR *AH = CSRm::init(A->n, A->m, (A->nnz - A->n), true, true, A->is_symmetric, A->full_n, A->row_shift);
@@ -235,15 +234,16 @@ __global__ void _make_w(stype nnz, vtype *val, vtype min){
   if(i >= nnz)
     return;
   vtype scratch=fabs(val[i]);
-  val[i] = log(  scratch?scratch:EPS / (0.999 * (min))  );
-
+//  val[i] = log(  scratch>DBL_EPSILON?scratch:DBL_EPSILON / (0.999 * (min))  );
+  val[i] = log(  scratch?scratch:EPS / (0.999 * (min))  );  
+// if(!(fabs(scratch)>0)) {printf("make_w: %d %14.12g %14.12g %14.12g\n",i,EPS,DBL_EPSILON,log(DBL_EPSILON/(0.999*(min))));}
 }
 
 
 CSR* toMaximumProductMatrix(CSR *AH){
   _MPI_ENV;
   assert(AH->on_the_device);
-  static int cnt=0;
+
   stype nnz = AH->nnz;
   // find the min value
   vtype *min = find_Max_Min(AH->val, nnz, 1);
@@ -251,14 +251,19 @@ CSR* toMaximumProductMatrix(CSR *AH){
   vtype h_local_min;
   CHECK_DEVICE( cudaMemcpy(&h_local_min, min, sizeof(vtype), cudaMemcpyDeviceToHost) );
 //  CHECK_DEVICE( cudaFree(min) );
-
+#if 0
   if(!(fabs(h_local_min)>0)) {
           fprintf(stderr,"Error for Task %d, size of AH=%d, full size of AH=%d, h_local_min=%g, count=%d\n",myid,AH->n,AH->full_n,h_local_min,cnt);
 	  exit(0);
   }
+#endif  
+  if((fabs(h_local_min))<DBL_EPSILON) {
+          h_local_min=DBL_EPSILON;
+  }
+
   gridblock gb = gb1d(nnz, BLOCKSIZE, false);
   _make_w<<<gb.g, gb.b>>>(nnz, AH->val, h_local_min);
-
+  
   return AH;
 }
 
@@ -278,6 +283,7 @@ vector<itype>* suitor(handles *h, CSR *A, vector<vtype> *w){
   CSR *AH = makeAH(A, w);
 
   CSR *W = toMaximumProductMatrix(AH);
+
   if(DETAILED_TIMING && ISMASTER){
     cudaDeviceSynchronize();
 //     TOTAL_MAKEAHW_TIME += TIME::stop();
@@ -311,7 +317,7 @@ vector<itype>* suitor(handles *h, CSR *A, vector<vtype> *w){
   _write_T_warp<<<gb.g, gb.b>>>(n, warp_size, W->val, W->col, W->row, W->row_shift);
 
   approx_match_gpu_suitor(h, A, W, _M, ws_buffer, mutex_buffer);
-  
+
   if(DETAILED_TIMING && ISMASTER){
 //     SUITOR_TIME += TIME::stop();
       TIMER_STOP;
@@ -327,5 +333,6 @@ vector<itype>* suitor(handles *h, CSR *A, vector<vtype> *w){
   // -------------------------
   
   POP_RANGE
+
   return _M;
 }

@@ -26,15 +26,8 @@ int CSRm::choose_mini_warp_size(CSR *A){
 
 // extern functionCall_cnt function_cnt;
 
-CSR* CSRm::init(itype n, itype m, itype nnz, bool allocate_mem, bool on_the_device, bool is_symmetric, itype full_n, itype row_shift){
+CSR* CSRm::init(stype n, gstype m, stype nnz, bool allocate_mem, bool on_the_device, bool is_symmetric, gstype full_n, gstype row_shift){
 
-#if CUDAMALLOCCNTON
-    if (allocate_mem && on_the_device) {
-        FUNCTIONCALL_CNT( cudamalloc_cnt, "CSRm::Init", "Total CSRm::Init" )
-    }
-#endif
-//   assert(n > 0 && m > 0 && nnz >= 0);
-  
 // ---------- Pico ----------
   if ( n<=0 || m <=0 || nnz <=0){
       fprintf(stderr, "error in CSRm::init:\n\tint  n: %d  m: %d  nnz: %d\n\tunsigned  n: %u  m: %u  nnz: %u\n", n, m, nnz, n, m, nnz);
@@ -43,7 +36,7 @@ CSR* CSRm::init(itype n, itype m, itype nnz, bool allocate_mem, bool on_the_devi
   }
   assert(n > 0);
   assert(m > 0);
-  assert(nnz >= 0);
+  assert(nnz > 0);
 // --------------------------
   
   CSR *A = NULL;
@@ -66,12 +59,13 @@ CSR* CSRm::init(itype n, itype m, itype nnz, bool allocate_mem, bool on_the_devi
 
   A->rows_to_get = NULL;
   
-  itype shrinked_firstrow = 0;
-  itype shrinked_lastrow  = 0;
+  //itype shrinked_firstrow = 0;
+  //itype shrinked_lastrow  = 0;
   A->shrinked_flag = false;
   A->shrinked_col = NULL;
   A->shrinked_m = m;
   A->halo.init = false;
+  A->col_shifted=0;
   
   A->post_local = 0;
   A->bitcolsize = 0;
@@ -134,19 +128,19 @@ void CSRm::print(CSR *A, int type, int limit, FILE* fp){
       }
       break;
     case 1:
-      fprintf(fp, "COL:\n\t");
+      fprintf(fp, "COL:\n");
       if(limit == 0)
         limit = A_->nnz;
       for(int i=0; i<limit; i++){
-        fprintf(fp, "%3d ", A_->col[i]);
+        fprintf(fp, "%d\n", A_->col[i]);
       }
       break;
     case 2:
-      fprintf(fp, "VAL:\n\t");
+      fprintf(fp, "VAL:\n");
       if(limit == 0)
         limit = A_->nnz;
       for(int i=0; i<limit; i++){
-        fprintf(fp, "%6.2lf ", A_->val[i]);
+        fprintf(fp, "%14.12g\n", A_->val[i]);
       }
       break;
     case 3:
@@ -157,12 +151,12 @@ void CSRm::print(CSR *A, int type, int limit, FILE* fp){
               int flag = 0, temp = A_->row[i];
               for ( temp = A_->row[i]; flag==0 && (i!=(A_->n)-1 ? temp < (A_->row[i+1]) : temp < A_->nnz) ; temp++ ) {
                 if (A_->col[temp] == j) {
-                    fprintf(fp, "%6.2lf ", A_->val[temp]);
+                    fprintf(fp, "%g ", A_->val[temp]);
                     flag = 1;
                 }
               }
               if (flag == 0)
-                fprintf(fp, "%6.2lf ", 0.0);
+                fprintf(fp, "%g ", 0.0);
           }
           fprintf(fp, "\n");
       }
@@ -187,6 +181,15 @@ void CSRm::print(CSR *A, int type, int limit, FILE* fp){
           fprintf(fp, "\n");
       }
       break;
+    case 5:
+      fprintf(fp, "SHRINKED COL:\n");
+      if(limit == 0)
+        limit = A_->shrinked_m;
+      for(int i=0; i<limit; i++){
+        fprintf(fp, "%d\n", A_->shrinked_col[i]);
+      }
+      break;
+      
   }
   fprintf(fp, "\n\n");
   
@@ -495,8 +498,8 @@ halo_info CSRm::clone_halo( halo_info* a) {
     
     b.to_receive_n = a->to_receive_n;
     if (a->to_receive_n > 0) {
-        b.to_receive = Vector::clone<itype>(a->to_receive);
-        b.to_receive_d = Vector::clone<itype>(a->to_receive_d);
+        b.to_receive = Vector::clone<gstype>(a->to_receive);
+        b.to_receive_d = Vector::clone<gstype>(a->to_receive_d);
     }
     
     b.to_receive_counts = (int*) malloc(sizeof(int) * nprocs);
@@ -569,8 +572,10 @@ void CSRm::free(CSR *A){
         CHECK_DEVICE(err);
         err = cudaFree(A->row);
         CHECK_DEVICE(err);
-        if (A->shrinked_col != NULL)
-            cudaFree(A->shrinked_col);
+        if (A->shrinked_col != NULL) {
+            err = cudaFree(A->shrinked_col);
+            CHECK_DEVICE(err);
+        }
     }
   }else{
     std::free(A->val);
@@ -598,8 +603,9 @@ void CSRm::free(CSR *A){
   }
   
   // ------------- custom cudaMalloc -------------
-//   if (A->bitcol != NULL)
-//       cudaFree(A->bitcol);
+//   if (A->bitcol != NULL) {
+//       CHECK_DEVICE( cudaFree(A->bitcol) );
+//   }
   // ---------------------------------------------
   
   // Free the halo_info halo halo_info halo; 
@@ -629,20 +635,31 @@ void CSRm::printInfo(CSR *A, FILE* fp){
 	fprintf(fp, "\n");
 }
 
+void shift_cpucol(itype *Arow, itype *Acol, unsigned int n, stype row_shift) {
+
+  for(unsigned int i=0; i<n; i++){
+      for (unsigned int j = Arow[i]; j< Arow[i+1]; j++) {
+           Acol[j]+=row_shift;
+      }
+  }
+  /*  A->col_shifted=-row_shift; */
+}
+
+
 CSR* CSRm::copyToDevice(CSR *A){
 
   assert( !A->on_the_device );
 
-  itype n, m, nnz;
-
+  itype n, nnz;
+  gstype m;
   n = A->n;
   m = A->m;
 
   nnz = A->nnz;
 
-  // alocate CSR matrix on the device memory
+  // allocate CSR matrix on the device memory
   CSR *A_d = CSRm::init(n, m, nnz, true, true, A->is_symmetric, A->full_n, A->row_shift);
-  A_d->full_m = A->full_m;  // NOTE de elliminare cambiando CSRm::Init inserendo full_m
+  A_d->full_m = A->full_m;  // NOTE da eliminare cambiando CSRm::Init inserendo full_m
 
   cudaError_t err;
   err = cudaMemcpy(A_d->val, A->val, nnz * sizeof(vtype), cudaMemcpyHostToDevice);
@@ -667,9 +684,9 @@ CSR* CSRm::copyToHost(CSR *A_d){
 
   nnz = A_d->nnz;
 
-  // alocate CSR matrix on the device memory
+  // allocate CSR matrix on the device memory
   CSR *A = CSRm::init(n, m, nnz, true, false, A_d->is_symmetric, A_d->full_n, A_d->row_shift);
-  A->full_m = A_d->full_m;  // NOTE de elliminare cambiando CSRm::Init inserendo full_m
+  A->full_m = A_d->full_m;  // NOTE da eliminare cambiando CSRm::Init inserendo full_m
 
   cudaError_t err;
 
@@ -679,6 +696,14 @@ CSR* CSRm::copyToHost(CSR *A_d){
   CHECK_DEVICE(err);
   err = cudaMemcpy(A->col, A_d->col, nnz * sizeof(itype), cudaMemcpyDeviceToHost);
   CHECK_DEVICE(err);
+  if(A_d->shrinked_m) {
+    A->shrinked_col=(itype *)malloc(A_d->shrinked_m*sizeof(itype));
+    CHECK_HOST(A->shrinked_col);
+    err = cudaMemcpy(A->shrinked_col, A_d->shrinked_col,A_d->shrinked_m * sizeof(itype), cudaMemcpyDeviceToHost);    
+  } else {
+    A->shrinked_col=NULL;
+  }
+  
 
   return A;
 }
@@ -686,16 +711,17 @@ CSR* CSRm::copyToHost(CSR *A_d){
 
 
 __global__
-void _shift_cols(itype n, itype *col, itype shift){
+void _shift_cols(itype n, itype *col, gsstype shift){
   itype i = blockDim.x * blockIdx.x + threadIdx.x;
-
+  
   if(i >= n)
     return;
-
-  col[i] += shift;
+  gsstype scratch=col[i];
+  scratch+=shift;
+  col[i] = scratch;
 }
 
-void CSRm::shift_cols(CSR* A, itype shift){
+void CSRm::shift_cols(CSR* A, gsstype shift){
   PUSH_RANGE(__func__, 7)
     
   assert(A->on_the_device);
@@ -714,7 +740,7 @@ CSR* CSRm::T(cusparseHandle_t cusparse_h, CSR* A){
   cusparseIndexBase_t idxbase = CUSPARSE_INDEX_BASE_ZERO;
 
   // --------------------------- Custom CudaMalloc ---------------------------------
-  CSR *AT = CSRm::init(A->m, A->n, A->nnz, true, true, A->is_symmetric, A->m, 0);
+  CSR *AT = CSRm::init((stype)A->m, (gstype) A->n, A->nnz, true, true, A->is_symmetric, A->m, 0);
   //CSR *AT = CSRm::init(n_rows, A->n, A->nnz, true, true, A->is_symmetric, A->m, 0);
   // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
   //CSR *AT = CSRm::init(A->m, A->n, A->nnz, false, true, A->is_symmetric, A->m, 0);
@@ -770,14 +796,14 @@ CSR* CSRm::T(cusparseHandle_t cusparse_h, CSR* A){
   );
   CHECK_CUSPARSE(err);
 
-  cudaFree(buff_T);
+  CHECK_DEVICE( cudaFree(buff_T) );
 
   return AT;
 }
 
 
 
-CSR* CSRm::T_multiproc(cusparseHandle_t cusparse_h, CSR* A, itype n_rows, bool used_by_solver){
+CSR* CSRm::T_multiproc(cusparseHandle_t cusparse_h, CSR* A, stype n_rows, bool used_by_solver){
 
   assert( A->on_the_device );
 
@@ -842,7 +868,7 @@ CSR* CSRm::T_multiproc(cusparseHandle_t cusparse_h, CSR* A, itype n_rows, bool u
   );
   CHECK_CUSPARSE(err);
 
-  cudaFree(buff_T);
+  CHECK_DEVICE( cudaFree(buff_T) );
 
   return AT;
 }
@@ -902,7 +928,7 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp(cusparseHandle_t cuspar
   else if(density < MINI_WARP_THRESHOLD_4)
     min_w_size = 4;
   else if(density < MINI_WARP_THRESHOLD_8)
-    min_w_size = 8;
+    min_w_size = 4;
   else
     min_w_size = 16;
 
@@ -962,7 +988,7 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp_new(cusparseHandle_t cu
   
   assert(A->shrinked_flag == 1);
   
-  CSR* A_ = CSRm::init(A->n, A->shrinked_m, A->nnz, false, A->on_the_device, A->is_symmetric, A->full_n, A->row_shift);
+  CSR* A_ = CSRm::init(A->n, (gstype)A->shrinked_m, A->nnz, false, A->on_the_device, A->is_symmetric, A->full_n, A->row_shift);
   A_->row = A->row;
   A_->val = A->val;
   A_->col = A->shrinked_col;
@@ -979,11 +1005,11 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp_new(cusparseHandle_t cu
     x_ = Vector::init<vtype>(A_->m, false, true);
     if(A_->m>xsize) {
         if(xsize>0) {
-            cudaFree(xvalstat);
+            CHECK_DEVICE( cudaFree(xvalstat) );
         }
         xsize = A_->m;
         cudaMalloc_CNT
-        cudaMalloc(&xvalstat,sizeof(vtype)*xsize);
+        CHECK_DEVICE( cudaMalloc(&xvalstat,sizeof(vtype)*xsize) );
     }
     x_->val = xvalstat;
     gridblock gb = gb1d(A_->m, BLOCKSIZE);
@@ -1316,7 +1342,7 @@ vector<vtype>* CSRm::CSRVector_product_CUSPARSE(cusparseHandle_t cusparse_h, CSR
   CHECK_CUSPARSE(err);
 
 
-  cudaFree(buffer);
+  CHECK_DEVICE( cudaFree(buffer) );
   cusparseDestroyDnVec(x_dnVecDescr);
   cusparseDestroyDnVec(y_dnVecDescr);
   cusparseDestroySpMat(A_descr);
@@ -1423,8 +1449,9 @@ __global__ void _getDiagonal(itype n, vtype *val, itype *col, itype *row, vtype 
     itype c = col[j];
 
     // if is a diagonal element
-    if(c == (r + row_shift)){
+    if(c == (r /* + row_shift */)){
       D[i] = val[j];
+      break;
     }
   }
 }

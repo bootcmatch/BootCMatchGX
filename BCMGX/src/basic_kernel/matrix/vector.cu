@@ -12,14 +12,9 @@
 namespace Vector{
 
   template <typename T>
-  vector<T>* init(int n, bool allocate_mem, bool on_the_device){
-#if CUDAMALLOCCNTON
-    if (allocate_mem && on_the_device) {
-        FUNCTIONCALL_CNT( cudamalloc_cnt, "Total Vector::Init", "Total Vector::Init" )
-    }
-#endif
+  vector<T>* init(unsigned int n, bool allocate_mem, bool on_the_device){
     
-    if (n<=0){
+    if (n==0){
         fprintf(stderr, "error in Vector::init: n as int = %d, n as unsigned int = %u\n", n, n);
     }
     assert(n>0);
@@ -182,7 +177,7 @@ namespace Vector{
 
     int n = v_d->n;
 
-    // alocate vector on the host memory
+    // allocate vector on the host memory
     vector<T> *v = init<T>(n, true, false);
 
     cudaError_t err;
@@ -200,7 +195,7 @@ namespace Vector{
       err = cudaFree(v->val);
       CHECK_DEVICE(err);
     }else{
-      assert(v->val>0);
+      assert(v->val);
       std::free(v->val);
     }
     std::free(v);
@@ -308,15 +303,15 @@ namespace Vector{
 //       std::cout << " ";
 //   		fprintf(fp, "%0.3lf", v_->val[i]);
         if(std::is_same<T,int>::value)
-            fprintf(fp, "%3d", v_->val[i]);
+            fprintf(fp, "%d\n", v_->val[i]);
         else if(std::is_same<T,double>::value)
-            fprintf(fp, "%9.3e", v_->val[i]);
+            fprintf(fp, "%g\n", v_->val[i]);
         else
             fprintf(fp, "unknown type");
-      fprintf(fp, " ");
+//      fprintf(fp, " ");
   	}
 //     std::cout << "\n\n";
-  	fprintf(fp, "\n\n");
+//     fprintf(fp, "\n\n");
 
     if(v->on_the_device){
       Vector::free<T>(v_);
@@ -464,7 +459,7 @@ template <typename T>
   namespace Collection{
 
     template<typename T>
-    vectorCollection<T>* init(int n){
+    vectorCollection<T>* init(unsigned int n){
       vectorCollection<T> *c = NULL;
       c = (vectorCollection<T>*) malloc(sizeof(vectorCollection<T>));
       CHECK_HOST(c);
@@ -493,17 +488,20 @@ template <typename T>
 }
 
 namespace Vector{
-  template vector<itype>* init<itype>(int, bool, bool);
-  template vector<vtype>* init<vtype>(int, bool, bool);
+  template vector<itype>* init<itype>(unsigned int, bool, bool);
+  template vector<gstype>* init<gstype>(unsigned int, bool, bool);  
+  template vector<vtype>* init<vtype>(unsigned int, bool, bool);
 
   template void fillWithValue<itype>(vector<itype>*, itype);
   template void fillWithValue<vtype>(vector<vtype>*, vtype);
   template void fillWithValueWithOff<vtype>(vector<vtype>*, vtype, itype, itype);
 
   template vector<itype>* clone<itype>(vector<itype>*);
+  template vector<gstype>* clone<gstype>(vector<gstype>*);  
   template vector<vtype>* clone<vtype>(vector<vtype>*);
 
   template vector<itype>* copyToDevice<itype>(vector<itype>*);
+  template vector<gstype>* copyToDevice<gstype>(vector<gstype>*);  
   template vector<vtype>* copyToDevice<vtype>(vector<vtype>*);
 
   template void copyTo<itype>(vector<itype>*, vector<itype>*);
@@ -532,8 +530,8 @@ namespace Vector{
 
   namespace Collection{
 
-    template vectorCollection<itype>* init<itype>(int);
-    template vectorCollection<vtype>* init<vtype>(int);
+    template vectorCollection<itype>* init<itype>(unsigned int);
+    template vectorCollection<vtype>* init<vtype>(unsigned int);
 
     template void free<itype>(vectorCollection<itype>*);
     template void free<vtype>(vectorCollection<vtype>*);

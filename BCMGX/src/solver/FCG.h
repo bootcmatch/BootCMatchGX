@@ -27,11 +27,15 @@ namespace FCG{
 
   void initPreconditionContext(hierarchy *hrrch);
 
-  void setHrrchBufferSize(hierarchy *hrrch);
+  //void setHrrchBufferSize(hierarchy *hrrch);
+  void setHrrchBufferSize(hierarchy *hrrch, int coarsesolver_type);
 
   void freePreconditionContext();
 }
 
-void preconditionApply(handles *h, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, vector<vtype> *rhs, vector<vtype> *x);
+//void preconditionApply(handles *h, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, vector<vtype> *rhs, vector<vtype> *x);
+void preconditionApply(handles *h, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, vector<vtype> *rhs, vector<vtype> *x, int coarsesolver_type);
 
-vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vector<vtype> *rhs, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, int precon, int max_iter, double rtol, int *num_iter, bool precondition_flag);
+//vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vector<vtype> *rhs, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, int precon, int max_iter, double rtol, int *num_iter, bool precondition_flag);
+
+vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vector<vtype> *rhs, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, int precon, int max_iter, double rtol, int *num_iter, bool precondition_flag, int coarsesolver_type);

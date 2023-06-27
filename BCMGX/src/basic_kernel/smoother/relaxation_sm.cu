@@ -55,7 +55,7 @@ void free_overlappedSmootherList(overlappedSmootherList *osl){
 }
 
 __global__
-void _findNeedyRows(itype n, int MINI_WARP_SIZE, itype *A_row, itype *A_col, itype *needy_rows, itype *loc_rows, itype *needy_n, itype *loc_n, itype start, itype end){
+void _findNeedyRows(itype n, int MINI_WARP_SIZE, itype *A_row, itype *A_col, itype *needy_rows, itype *loc_rows, itype *needy_n, itype *loc_n, gstype start, gstype end){
   itype tid = blockDim.x * blockIdx.x + threadIdx.x;
 
   int warp = tid / MINI_WARP_SIZE;
@@ -261,7 +261,7 @@ int binsearch(int array[], unsigned int size, int value) {
 
 template <int OP_TYPE, int MINI_WARP_SIZE>
 __global__
-void _jacobi_it_partial_new(itype n, itype *rows, vtype relax_weight, vtype *A_val, itype *A_row, itype *A_col, vtype *D, vtype *u, vtype *f, vtype *u_, itype shift, itype An, itype* halo_index, itype halo_index_size, vtype* halo_val, bool balc_flag){
+void _jacobi_it_partial_new(itype n, itype *rows, vtype relax_weight, vtype *A_val, itype *A_row, itype *A_col, vtype *D, vtype *u, vtype *f, vtype *u_, gstype shift, itype An, gstype* halo_index, itype halo_index_size, vtype* halo_val, bool balc_flag, int post_local){
   itype tid = blockDim.x * blockIdx.x + threadIdx.x;
 
   int warp = tid / MINI_WARP_SIZE;
@@ -279,17 +279,9 @@ void _jacobi_it_partial_new(itype n, itype *rows, vtype relax_weight, vtype *A_v
   vtype T_i = 0.;
 
   // A * u
+  
   for(int j=A_row[warp]+lane; j<A_row[warp+1]; j+=MINI_WARP_SIZE){
-      if ( (A_col[j] >= shift) && (A_col[j] < shift + An) ) {
-        T_i += A_val[j] * __ldg(&u[A_col[j]-shift]);
-      } else {      // NOTE: molto dispendioso?
-//         int k = 0;
-//         while (halo_index[k] != A_col[j])
-//             k++;
-        int k=binsearch(halo_index, halo_index_size, A_col[j]);
-        
-        T_i += A_val[j] * __ldg(&halo_val[k]);
-      }
+        T_i += A_val[j] * __ldg(&halo_val[A_col[j]]);
   }
 
   // WARP sum reduction
@@ -302,9 +294,38 @@ void _jacobi_it_partial_new(itype n, itype *rows, vtype relax_weight, vtype *A_v
     u_[warp] = ( (-T_i + f[warp]) / D[warp] ) + u[warp];
 }
 
+__global__
+void _relax_sync( vtype* local_x, itype local_n, vtype *what_to_receive_d, itype receive_n, itype post_local, vtype* x, itype x_n ) {
+    int id = blockDim.x * blockIdx.x + threadIdx.x;
 
+    if (id < x_n) {
+        if (id < post_local) {
+            if(id>receive_n) {
+                printf("Horror 1 in thread %d\n",id);
+            }
+            x[id] = what_to_receive_d[id];
+        } else {
+            if ( id < post_local + local_n ) {
+                if((id-post_local)<0 || (id-post_local)>local_n) {
+                    printf("Horror 2 in thread %d %d\n",id,post_local);
+                }
+                x[id] = local_x[id - post_local];
+            } else {
+                if((id-local_n)<0 || (id-local_n)>receive_n) {
+                    printf("Horror 3 in thread %d local_n=%d receive_n=%d x_n=%d post_local=%d\n",id,local_n,receive_n, x_n,post_local);
+                }
+                x[id] = what_to_receive_d[id - local_n];
+            }
+        }
+    }
+    
+}
+
+static int relax_xsize=0;
+static vtype *relax_xvalstat=NULL;
+int srmfb=-1;
 #define GET_TIME_J false
-#define MAXNTASKS 1024
+#define MAXNTASKS 4096
 #define JACOBI_TAG 1234
 
 template <int MINI_WARP_SIZE>
@@ -317,8 +338,45 @@ vector<vtype>* internal_jacobi_overlapped(int level, int k, CSR *A, vector<vtype
   halo_info hi = A->halo;//H_halo_info[level];
   static MPI_Request requests[MAXNTASKS];
   static int ntr=0;
+  
+  if(A->shrinked_flag==false) {
+#if 0
+       srmfb=myid;
+       printf("Task %d: shrinking col of %x\n",myid,A);
+       shrink_col(A,NULL);
+       itype H_ASC[A->nnz];
+       cudaMemcpy(H_ASC,A->shrinked_col,sizeof(itype)*A->nnz,cudaMemcpyDeviceToHost);
+    char filename[256];
+    snprintf(filename,sizeof(filename),"ASC_%d_%d",level,myid);
+    FILE *fp=fopen(filename,"w");
+    if(fp==NULL) {
+               fprintf(stderr,"Could not open X\n");
+    }
+    for(int i=0; i<A->nnz; i++) {
+        fprintf(fp,"%d\n",H_ASC[i]);
+    }
+    fclose(fp);
+        itype H_AR[A->n+1];
+        cudaMemcpy(H_AR,A->row,sizeof(itype)*(A->n+1),cudaMemcpyDeviceToHost);
+    snprintf(filename,sizeof(filename),"AR_%d_%d",level,myid);
+    fp=fopen(filename,"w");
+    if(fp==NULL) {
+               fprintf(stderr,"Could not open X\n");
+    }
+    for(int i=0; i<(A->n+1); i++) {
+        fprintf(fp,"%d\n",H_AR[i]);
+    }
+    fclose(fp);
+#endif
+    fprintf(stderr,"A must be shrinked before relaxation!\n");
+    exit(1);
+  } 
+  int post_local = A->post_local;
+  vector<vtype> *x_ = NULL;
+#if 0
+  printf("Task %d, level %d, matrix=%x,to_send_n=%d, to_recv_n=%d, needy_n=%d, u_n=%d, A_n=%d, A_m=%d, A_shrinked_m=%d,  A_full_n=%lu, post_local=%d loc_n=%d\n",myid,level,A,hi.to_send_n,hi.to_receive_n,os.needy_n,u->n,A->n,A->m, A->shrinked_m,A->full_n,post_local,os.loc_n);      
+#endif
 
-        
   for(int i=0; i<k; i++){
 
     if(i)
@@ -326,11 +384,14 @@ vector<vtype>* internal_jacobi_overlapped(int level, int k, CSR *A, vector<vtype
 
     // start get to send
     if(hi.to_send_n){
+      assert( hi.what_to_send != NULL );
+      assert( hi.what_to_send_d != NULL );
       gridblock gb = gb1d(hi.to_send_n, BLOCKSIZE);
       _getToSend_new<<<gb.g, gb.b, 0, *osl->comm_stream>>>(hi.to_send_d->n, u->val, hi.what_to_send_d, hi.to_send_d->val, A->row_shift);
       CHECK_DEVICE( cudaMemcpyAsync(hi.what_to_send, hi.what_to_send_d, hi.to_send_n*sizeof(vtype), cudaMemcpyDeviceToHost, *osl->comm_stream) );
     }
 
+    x_ = u;
     
     if(os.loc_n){
         // start compute local
@@ -339,17 +400,19 @@ vector<vtype>* internal_jacobi_overlapped(int level, int k, CSR *A, vector<vtype
             os.loc_n,
             os.loc_rows->val,
             relax_weight,
-            A->val, A->row, A->col,
+            A->val, A->row, A->shrinked_col,
             D->val, 
             u->val, 
             f->val, 
             (*u_)->val,
             A->row_shift,
             A->n,
-            hi.to_receive_d->val,
+            hi.to_receive_d->val, 
             hi.to_receive_d->n,
-            hi.what_to_receive_d,
-            false
+	    x_->val,
+/*            hi.what_to_receive_d, */
+            false,
+	    post_local
         );
     }
     
@@ -381,14 +444,44 @@ vector<vtype>* internal_jacobi_overlapped(int level, int k, CSR *A, vector<vtype
     // copy received data
     if(hi.to_receive_n){
       if(ntr>0) { CHECK_MPI(MPI_Waitall(ntr,requests,MPI_STATUSES_IGNORE)); }
+      assert( hi.what_to_receive != NULL );
+      assert( hi.what_to_receive_d != NULL );
       CHECK_DEVICE( cudaMemcpyAsync(hi.what_to_receive_d, hi.what_to_receive, hi.to_receive_n * sizeof(vtype), cudaMemcpyHostToDevice, *osl->comm_stream) );
-      
-      
       if (u->n == A->full_n) {        // PICO
         gb = gb1d(hi.to_receive_n, BLOCKSIZE);
         setReceivedWithMask<<<gb.g, gb.b, 0, *osl->comm_stream>>>(hi.to_receive_n , u->val, hi.what_to_receive_d, hi.to_receive_d->val, A->row_shift);
+#if 0
+        printf("A->full_n=%d, A->n=%d, A->m=%d, A->shrinked_m=%d\n",A->full_n,A->n,A->m,A->shrinked_m);
+#endif
       }
-      
+
+      x_ = Vector::init<vtype>(A->shrinked_m, false, true);
+          if(A->shrinked_m>relax_xsize) {
+	    cudaError_t err;
+      	    if(relax_xsize>0) {
+     	           CHECK_DEVICE( cudaFree(relax_xvalstat) );
+  	    }
+  	    relax_xsize = A->shrinked_m;
+            cudaMalloc_CNT
+            err=cudaMalloc(&relax_xvalstat,sizeof(vtype)*relax_xsize);
+            CHECK_DEVICE(err);
+          }
+      x_->val = relax_xvalstat;
+      gridblock gb = gb1d(A->shrinked_m, BLOCKSIZE);
+      //printf("_relax_sync\n");
+      _relax_sync<<<gb.g, gb.b,0,*osl->comm_stream>>>(u->val, A->n, hi.what_to_receive_d, hi.to_receive_d->n, post_local, x_->val, x_->n);
+#if 0
+{
+  char filename[256];
+  snprintf(filename,sizeof(filename),"x_%d_%d",i,myid);
+  FILE *fp=fopen(filename,"w");
+  if(fp==NULL) {
+               fprintf(stderr,"Could not open X\n");
+  }
+  Vector::print(x_,-1,fp);
+  fclose(fp);
+}     
+#endif
       // complete computation for halo
       gb = gb1d(os.needy_n, BLOCKSIZE, true, MINI_WARP_SIZE);
       if(os.needy_n) {
@@ -397,29 +490,47 @@ vector<vtype>* internal_jacobi_overlapped(int level, int k, CSR *A, vector<vtype
                 os.needy_n,
                 os.needy_rows->val,
                 relax_weight,
-                A->val, A->row, A->col,
+                A->val, A->row, A->shrinked_col,
                 D->val, 
                 u->val, 
                 f->val, 
                 (*u_)->val,
                 A->row_shift,
                 A->n,
-                hi.to_receive_d->val,
+                hi.to_receive_d->val, 
                 hi.to_receive_d->n,
-                hi.what_to_receive_d,
-                true
+/*                hi.what_to_receive_d, */
+		x_->val,		
+                true,
+		post_local
             );
       }
     }
 
+    cudaDeviceSynchronize();
     swap_temp = u;
     u = *u_;
+#if 0
+{
+  char filename[256];
+  snprintf(filename,sizeof(filename),"u_%d_%d",i,myid);
+  FILE *fp=fopen(filename,"w");
+  if(fp==NULL) {
+               fprintf(stderr,"Could not open X\n");
+  }
+  Vector::print(u,-1,fp);
+  fclose(fp);
+}     
+#endif
     *u_ = swap_temp;
   }
     
 
   cudaStreamSynchronize(*osl->local_stream);
   cudaStreamSynchronize(*osl->comm_stream);
+
+  if ( hi.to_receive_n > 0 )
+      std::free(x_);
 
   return u;
 }
@@ -432,7 +543,7 @@ vector<vtype>* jacobi_adaptive_miniwarp_overlapped(cusparseHandle_t cusparse_h, 
   else if (density <  MINI_WARP_THRESHOLD_4)
     return internal_jacobi_overlapped<4>(level, k, A, u, u_, f, D, relax_weight);
   else if (density <  MINI_WARP_THRESHOLD_8)
-    return internal_jacobi_overlapped<8>(level, k, A, u, u_, f, D, relax_weight);
+    return internal_jacobi_overlapped<4>(level, k, A, u, u_, f, D, relax_weight);
   else if(density < MINI_WARP_THRESHOLD_16)
     return internal_jacobi_overlapped<16>(level, k, A, u, u_, f, D, relax_weight);
   else

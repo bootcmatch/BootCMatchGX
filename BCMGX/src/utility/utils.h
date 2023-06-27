@@ -16,7 +16,10 @@
 #define DEFAULT_STREAM 0
 #define WARP_SIZE 32
 #define FULL_WARP 32
-#define FULL_MASK 0xFFFFFFFF
+
+#ifndef FULL_MASK
+  #define FULL_MASK 0xFFFFFFFF
+#endif
 
 #define MINI_WARP_THRESHOLD_2 3
 #define MINI_WARP_THRESHOLD_4 6

@@ -15,14 +15,14 @@ struct vector{
 
 template <typename T>
 struct vectorCollection{
-  int n; // number of non-zero
+  unsigned int n; // number of non-zero
   vector<T> **val;
 };
 
 namespace Vector{
 
   template <typename T>
-  vector<T>* init(int n, bool allocate_mem, bool on_the_device);
+  vector<T>* init(unsigned int n, bool allocate_mem, bool on_the_device);
 
   template <typename T>
   void fillWithValue(vector<T> *v, T value);
@@ -87,7 +87,7 @@ namespace Vector{
   namespace Collection{
 
     template<typename T>
-    vectorCollection<T>* init(int n);
+    vectorCollection<T>* init(unsigned int n);
 
     template<typename T>
     void free(vectorCollection<T> *c);

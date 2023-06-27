@@ -36,15 +36,16 @@ CSR* readMTXDouble(const char *file_name){
     char    banner[64], mtx[64], crd[64], data_type[64], storage_scheme[64];
     char    buffer[BUFSIZE+1];
     double  *matrix_value, *matrix_data, val;
-    int     *matrix_cooi, *matrix_i;
-    int     *matrix_cooj, *matrix_j;
-    int      num_rows, num_cols, ri, cj;
-    int      num_nonzeros, fr_nonzeros, allc_nonzeros;
-    int      max_col = 0, is_general=0, is_symmetric=0;
+    unsigned long int  *matrix_cooi, *matrix_i;
+    unsigned long int  *matrix_cooj, *matrix_j;
+    unsigned long int  num_rows, num_cols, ri, cj;
+    unsigned long int  fr_nonzeros, allc_nonzeros;
+    unsigned long int  num_nonzeros;
+    unsigned long int  max_col = 0, is_general=0, is_symmetric=0;
 
     int      file_base = 1;
 
-    int      i, j, k, k0, iad;
+    long int      i, j, k, k0, iad;
     double   x;
 
     /*----------------------------------------------------------
@@ -62,7 +63,8 @@ CSR* readMTXDouble(const char *file_name){
     //for ( ; buffer[0]=='\%';  fgets(buffer,BUFSIZE,fp) );
     for ( ; buffer[0]=='%';  fgets(buffer,BUFSIZE,fp) );
 
-    sscanf(buffer, "%d %d %d", &num_rows, &num_cols, &fr_nonzeros);
+    sscanf(buffer, "%lu %lu %lu", &num_rows, &num_cols, &fr_nonzeros);
+    //assert(num_rows > 0 && num_cols > 0 && fr_nonzeros >= 0 );
 
     if (strcmp(data_type,"real") !=0) {
       fprintf(stderr,"Error: we only read real matrices, not '%s'\n",data_type);
@@ -82,15 +84,15 @@ CSR* readMTXDouble(const char *file_name){
       return(NULL);
     }
 
-    matrix_cooi = (int *) calloc(allc_nonzeros, sizeof(int));
-    matrix_cooj = (int *) calloc(allc_nonzeros, sizeof(int));
+    matrix_cooi = (unsigned long int *) calloc(allc_nonzeros, sizeof(unsigned long int));
+    matrix_cooj = (unsigned long int *) calloc(allc_nonzeros, sizeof(unsigned long int));
     matrix_value = (double *) calloc(allc_nonzeros, sizeof(double));
     if (is_general) {
       num_nonzeros = fr_nonzeros;
       for (j = 0; j < fr_nonzeros; j++)
         {
   	if (fgets(buffer,BUFSIZE,fp) != NULL) {
-  	  sscanf(buffer, "%d %d %le", &matrix_cooi[j], &matrix_cooj[j], &matrix_value[j]);
+  	  sscanf(buffer, "%lu %lu %le", &matrix_cooi[j], &matrix_cooj[j], &matrix_value[j]);
   	  matrix_cooi[j] -= file_base;
   	  matrix_cooj[j] -= file_base;
   	  if (matrix_cooj[j] > max_col)
@@ -108,7 +110,7 @@ CSR* readMTXDouble(const char *file_name){
       k = 0;
       for (j = 0; j < fr_nonzeros; j++)   {
         if (fgets(buffer,BUFSIZE,fp) != NULL) {
-  	sscanf(buffer, "%d %d %le", &ri, &cj, &val);
+  	sscanf(buffer, "%lu %lu %le", &ri, &cj, &val);
   	ri -= file_base;
   	cj -= file_base;
   	if (cj > max_col)
@@ -141,11 +143,12 @@ CSR* readMTXDouble(const char *file_name){
      * Transform matrix from COO to CSR format
      *----------------------------------------------------------*/
 
-    matrix_i = (int *) calloc(num_rows+1, sizeof(int));
+    matrix_i = (unsigned long *) calloc(num_rows+1, sizeof(unsigned long));
 
     /* determine row lenght */
     for (j=0; j<num_nonzeros; j++) {
-      if ((0<=matrix_cooi[j])&&(matrix_cooi[j]<num_rows)){
+      //if ((0<=matrix_cooi[j])&&(matrix_cooi[j]<num_rows)){
+      if ( matrix_cooi[j]<num_rows ){
         matrix_i[matrix_cooi[j]]=matrix_i[matrix_cooi[j]]+1;
       } else {
         fprintf(stderr,"Wrong row index %d at position %d\n",matrix_cooi[j],j);
@@ -160,7 +163,7 @@ CSR* readMTXDouble(const char *file_name){
         matrix_i[j]=k;
         k=k+k0;
       }
-    matrix_j = (int *) calloc(num_nonzeros, sizeof(int));
+    matrix_j = (unsigned long int *) calloc(num_nonzeros, sizeof(unsigned long int));
     matrix_data = (double *) calloc(num_nonzeros, sizeof(double));
 
     /* go through the structure once more. Fill in output matrix */
@@ -178,11 +181,17 @@ CSR* readMTXDouble(const char *file_name){
     for(j=num_rows-1; j>=0; j--) matrix_i[j+1]=matrix_i[j];
     matrix_i[0]=0;
 
-    assert(num_rows > 0 && num_cols > 0 && num_nonzeros >= 0);
-    CSR *A = CSRm::init(num_rows, num_cols, num_nonzeros, false, false, false, num_rows);
+    //assert(num_rows > 0 && num_cols > 0 && num_nonzeros >= 0);
+    CSR *A = CSRm::init(num_rows, num_cols, num_nonzeros, true, false, false, num_rows);
+    free(A->val);
     A->val = matrix_data;
-    A->row = matrix_i;
-    A->col = matrix_j;
+
+    for(j=0; j<= num_rows; j++) {
+        A->row[j] = matrix_i[j];
+    }
+    for(k=0; k<num_nonzeros; k++) {
+        A->col[k] = matrix_j[k];
+    }
 
     free(matrix_cooi);
     free(matrix_cooj);

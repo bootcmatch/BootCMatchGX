@@ -1,17 +1,22 @@
-#define BLOCKSIZE 512 // 1024
+#define BLOCKSIZE 512 // 1024C
 // Matrix's value type
 #define vtype double
 // Matrix's index type
 #define itype  int
 // Matrix's sizes  type
-#define stype int
+#define stype unsigned int
+// Matrix's global size and row shift
+#define gstype unsigned long
+#define gsstype long int
 
 #define VTYPE_MPI MPI_DOUBLE
 #define ITYPE_MPI MPI_INT
+#define STYPE_MPI MPI_UINT32_T
+#define GSTYPE_MPI MPI_UINT64_T
 
 #define VERBOSE 0
 
-#define LOCAL_COARSEST 1
+//#define LOCAL_COARSEST 0
 
 #define SMART_VECTOR_AGGREGATION 1
 #define SMART_AGGREGATE_GETSET_GPU 1

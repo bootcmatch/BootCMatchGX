@@ -4,6 +4,8 @@
 #include "utility/function_cnt.h"
 #include "utility/cudamacro.h"
 
+#define GLOB_MEM_ALLOC_SIZE 2000000
+
 char linebuffer[BUFSIZE+1];
 
 int  int_get_fp(FILE *fp){
@@ -183,13 +185,14 @@ namespace AMG{
       PUSH_RANGE(__func__, 7)
        
       //unsigned long nnzp = 0;
-      long nnzp = 0;
+      unsigned long nnzp = 0;
+      unsigned long lnnz = A->nnz;
       CHECK_MPI(
         MPI_Allreduce(
-          &A->nnz,
+          &lnnz,
           &nnzp,
           1,
-          MPI_INT,
+          MPI_LONG,
           MPI_SUM,
           MPI_COMM_WORLD
         )
@@ -493,11 +496,39 @@ namespace AMG{
       inparms.coarse_solver     = int_get_fp(fp);
       inparms.relax_type        = int_get_fp(fp);
       inparms.relaxnumber_coarse= int_get_fp(fp);
+      inparms.coarsesolver_type = int_get_fp(fp);
       inparms.prerelax_sweeps   = int_get_fp(fp);
       inparms.postrelax_sweeps  = int_get_fp(fp);
       inparms.itnlim            = int_get_fp(fp);
       inparms.rtol              = double_get_fp(fp);
-      inparms.mem_alloc_size    = int_get_fp(fp);
+      //inparms.mem_alloc_size    = int_get_fp(fp);
+      inparms.mem_alloc_size    = GLOB_MEM_ALLOC_SIZE;
+      inparms.error             = 0;
+      
+      if ( inparms.coarsesolver_type != 0 && inparms.coarsesolver_type != 1){
+        std::cout <<  "[ERROR] coarsesolver_type not supported\n";
+        inparms.error = 1;
+      }
+      if ( inparms.max_hrc != 1 ){
+        std::cout <<  "[ERROR] bootstrap not yet supported\n";
+        inparms.error = 1;
+      }
+      if ( inparms.matchtype != 3 ){
+        std::cout <<  "[ERROR] matchtype value not supported\n";
+        inparms.error = 1;
+      }
+      if ( inparms.aggrtype != 0 ){
+        std::cout <<  "[ERROR] aggr_type value not supported\n";
+        inparms.error = 1;
+      }
+      if ( inparms.coarse_solver != 4 ){
+        std::cout <<  "[ERROR] coarse_solver value not supported\n";
+        inparms.error = 1;
+      }
+      if ( inparms.relax_type != 4 ){
+        std::cout << "[ERROR] relax_type value not supported\n";
+        inparms.error = 1;
+      }
 
       fclose(fp);
       return inparms;

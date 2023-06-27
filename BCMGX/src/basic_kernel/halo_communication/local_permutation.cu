@@ -234,18 +234,35 @@ typedef int (*__compar_fn_t)(const void *, const void *);
 //     
 //     return;
 // }
+#if 0
+binsearch(const itype array[], itype size, itype value) {
+ 29   itype low, high, medium;
+ 30   low=0;
+ 31   high=size;
+ 32   while(low<high) {
+ 33       medium=(high+low)/2;
+ 34       if(value > array[medium]) {
+ 35         low=medium+1;
+ 36       } else {
+ 37         high=medium;
+ 38       }
+ 39   }
+ 40   return low;
+ 41 }
+#endif
 
 __global__
 void apply_mask_permut_GPU_noSideEffects_glob (itype nnz, const itype *col, int shrinking_permut_len, const itype* shrinking_permut, itype* comp_col) {
     
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     
-    int number_of_permutations = shrinking_permut_len, start, med, end, flag;
+    //int number_of_permutations = shrinking_permut_len, start, med, end, flag;
+    int number_of_permutations = shrinking_permut_len, start, med, end;
     
     if (id < nnz) {
-        flag = 1;
         start = 0;
         end = number_of_permutations;
+#if 0
         while (flag && (end >= start) ) {
             med = start + (end - start)/2;
             if (col[id] == shrinking_permut[med]) {
@@ -258,6 +275,17 @@ void apply_mask_permut_GPU_noSideEffects_glob (itype nnz, const itype *col, int 
                     start = med +1;
             }
         }
+#else
+        while (start<end) {
+            med = (end + start)/2;
+            if (col[id] > shrinking_permut[med]) {
+                    start = med +1;
+            } else {
+                    end = med;
+            }
+        }
+        comp_col[id] = start;
+#endif
     }
     
     return;
@@ -361,16 +389,31 @@ vector<itype>* apply_mask_permut_GPU_noSideEffects (const CSR *Alocal, const vec
 //     return;
 // }
 
+extern int srmfb;
+
 bool shrink_col(CSR* A, CSR* P) {
     vector<int> *get_shrinked_col( CSR*, CSR* );
     if (!(A->shrinked_flag)) {
         if ( P != NULL ) {    // product compatibility check
+	        if(A->m!=P->full_n) {
+		       fprintf(stderr,"A->m=%lu, P->full_n=%lu\n",A->m,P->full_n);
+	        }
             assert( A->m == P->full_n );
         } else {
             assert( A->m == A->full_n );
         }
   
         vector<itype>* shrinking_permut = get_shrinked_col( A, P );
+        if(0) {
+  char filename[256];
+  snprintf(filename,sizeof(filename),"shrinking_permut_%x_%d",A,srmfb);
+  FILE *fp=fopen(filename,"w");
+  if(fp==NULL) {
+       fprintf(stderr,"Could not open X\n");
+  }
+  Vector::print(shrinking_permut,-1,fp);
+  fclose(fp);
+        }
         assert ( shrinking_permut->n >= (P!=NULL ? P->n : A->n) );
         vector<itype>* shrinkedA_col = apply_mask_permut_GPU_noSideEffects (A, shrinking_permut);
         
@@ -386,8 +429,8 @@ bool shrink_col(CSR* A, CSR* P) {
     }
 }
 
-bool shrink_col(CSR* A, itype firstlocal, itype lastlocal, itype global_len) {
-    vector<int> *get_shrinked_col( CSR*, itype, itype );
+bool shrink_col(CSR* A, stype firstlocal, stype lastlocal, itype global_len) {
+    vector<int> *get_shrinked_col( CSR*, stype, stype);
     if (!(A->shrinked_flag)) {
         
         assert( A->m == global_len );

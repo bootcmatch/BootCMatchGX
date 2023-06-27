@@ -8,7 +8,7 @@
 
 template <typename T>
 __inline__
-void chop_array_MPI_same(int nprocs, int n, int *chunks, int *chunkn){
+void chop_array_MPI_same(int nprocs, unsigned n, unsigned *chunks, unsigned *chunkn){
   int i;
   int e4chunk = n / nprocs * sizeof(T);
   for(i=0; i<nprocs-1; i++){
@@ -29,7 +29,7 @@ void chop_array_MPI(int nprocs, int n, int n_local, int *chunks, int *chunkn){
       &n_local,
       sizeof(itype),
       MPI_BYTE,
-      &ns,
+      ns,
       sizeof(itype),
       MPI_BYTE,
       MPI_COMM_WORLD
@@ -181,32 +181,32 @@ CSR* split_local(CSR *A){
 CSR* split_MatrixMPI(CSR *A){
   _MPI_ENV;
 
-  itype colxproc[nprocs];
-  itype rowsxproc = 0;
+  gstype colxproc[nprocs];
+  stype rowsxproc = 0;
 
   if(ISMASTER){
     assert(!A->on_the_device);
     //Split A
-    rowsxproc = A->n / nprocs;
+    rowsxproc = A->full_n / nprocs;
     for(itype i=1; i<nprocs; i++) {
       colxproc[i-1] = A->row[i*rowsxproc] - A->row[(i-1)*rowsxproc];
     }
-    colxproc[nprocs-1] = A->row[A->n] - A->row[(nprocs-1)*rowsxproc];
+    colxproc[nprocs-1] = A->row[A->full_n] - A->row[(nprocs-1)*rowsxproc];
   }
 
 
-  itype n, m;
+  gstype n, m;
   if(ISMASTER){
     n = A->n;
     m = A->m;
   }
 
   CHECK_MPI(
-    MPI_Bcast(&n, sizeof(itype), MPI_BYTE, 0, MPI_COMM_WORLD)
+    MPI_Bcast(&n, sizeof(gstype), MPI_BYTE, 0, MPI_COMM_WORLD)
   );
 
   CHECK_MPI(
-    MPI_Bcast(&m, sizeof(itype), MPI_BYTE, 0, MPI_COMM_WORLD)
+    MPI_Bcast(&m, sizeof(gstype), MPI_BYTE, 0, MPI_COMM_WORLD)
   );
 
   if( (nprocs>1) && myid==(nprocs-1) )
@@ -216,15 +216,15 @@ CSR* split_MatrixMPI(CSR *A){
     // compute the number of rows for the process
     rowsxproc = n / nprocs;
 
-  itype mycol = 0;
+  gstype mycol = 0;
   // send columns numbers to each process
   CHECK_MPI(
     MPI_Scatter(
       colxproc,
-      sizeof(itype),
+      sizeof(gstype),
       MPI_BYTE,
       &mycol,
-      sizeof(itype),
+      sizeof(gstype),
       MPI_BYTE,
       0,
       MPI_COMM_WORLD
@@ -232,18 +232,18 @@ CSR* split_MatrixMPI(CSR *A){
   );
 
 
-  int chunks[nprocs], chunkn[nprocs];
-  chop_array_MPI_same<itype>(nprocs, n, chunks, chunkn);
-  itype rows_shift = chunks[myid] / sizeof(itype);
+  stype chunks[nprocs], chunkn[nprocs];
+  chop_array_MPI_same<stype>(nprocs, (unsigned) n, chunks, chunkn);
+  stype rows_shift = chunks[myid] / sizeof(stype);
 
-  CSR *Alocal = CSRm::init(rowsxproc, m, mycol, true, false, false, n, rows_shift);
+  CSR *Alocal = CSRm::init(rowsxproc, m, (stype) mycol, true, false, false, n, rows_shift);
 
   // get row pointers
   CHECK_MPI(
     MPI_Scatterv(
       myid ? NULL : A->row,
-      chunkn,
-      chunks,
+      (int *)chunkn,
+      (int *)chunks,
       MPI_BYTE,
       Alocal->row,
       sizeof(itype) * rowsxproc,
@@ -264,8 +264,8 @@ CSR* split_MatrixMPI(CSR *A){
   CHECK_MPI(
     MPI_Scatterv(
       myid ? NULL : A->col,
-      chunkn,
-      chunks,
+      (int *)chunkn,
+      (int *)chunks,
       MPI_BYTE,
       Alocal->col,
       sizeof(itype) * mycol,
@@ -283,8 +283,8 @@ CSR* split_MatrixMPI(CSR *A){
   CHECK_MPI(
     MPI_Scatterv(
       myid ? NULL : A->val,
-      chunkn,
-      chunks,
+      (int *)chunkn,
+      (int *)chunks,
       MPI_BYTE,
       Alocal->val,
       sizeof(vtype) * mycol,
@@ -322,7 +322,7 @@ CSR* join_MatrixMPI(CSR *Alocal){
       &Alocal->n,
       sizeof(itype),
       MPI_BYTE,
-      &row_ns,
+      row_ns,
       sizeof(itype),
       MPI_BYTE,
       MPI_COMM_WORLD
@@ -337,7 +337,7 @@ CSR* join_MatrixMPI(CSR *Alocal){
       &Alocal->nnz,
       sizeof(itype),
       MPI_BYTE,
-      &nnzs,
+      nnzs,
       sizeof(itype),
       MPI_BYTE,
       MPI_COMM_WORLD
@@ -658,7 +658,7 @@ CSR* join_MatrixMPI_all(CSR *Alocal){
       &Alocal->n,
       sizeof(itype),
       MPI_BYTE,
-      &row_ns,
+      row_ns,
       sizeof(itype),
       MPI_BYTE,
       MPI_COMM_WORLD
@@ -673,7 +673,7 @@ CSR* join_MatrixMPI_all(CSR *Alocal){
       &Alocal->nnz,
       sizeof(itype),
       MPI_BYTE,
-      &nnzs,
+      nnzs,
       sizeof(itype),
       MPI_BYTE,
       MPI_COMM_WORLD

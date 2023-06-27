@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda.h>
+#include <cuda/semaphore>
 
 #include "prec_setup/spmspmMGPU/spspmpi.h"
 #include "utility/function_cnt.h" // PICO
@@ -14,28 +15,41 @@
 #define CHUNK_PER_WARP 16 
 #define WARP_SIZE 32
 #define _mask 0xFFFFFFFF
-
-
+#if 0
+__device__ cuda::binary_semaphore<cuda::thread_scope_device> s(1);
+#endif
 /*
  *  Method to lock a memory location
  */
 __device__ int lock_vertex(volatile int*  mutex, int id) {
-
+#if 0
     if (atomicCAS( (int*) (mutex + id), 0, 1) == 0)
-        return 1;
+#endif
+    while (atomicCAS( (int*) (mutex + id), 0, 1) != 0);
+    __threadfence();
+    return 1;
+#if 0    
     return 0;
+    s.acquire();
+    return 1;
+#endif    
 }
 
 /*
  * Method to Unlock a Memory Location
  */
 __device__ void unlock_vertex(volatile int*  mutex, int id) {
+    __threadfence();
     atomicExch((int*) (mutex + id), 0);
+#if 0
+    s.release();
+#endif
 }
-
+#if 0
 __device__ void unlock_me( volatile int*  mutex, int id) {
     atomicExch((int*) (mutex + id), 0);
 }
+#endif
 
 
 __device__ void memcpySIMD_int(int W_OFF, int segment_len, volatile int*  dest, int *src) {
@@ -55,10 +69,12 @@ __device__ void set_suitor(int candidate, double heaviest, int current_vid, int 
         int next_vertex = -1;
         *finished = _FALSE; /* case when you don't get lock */
         *new_vertex_to_care = current_vid; //-1;
-        int successful = 0;
+//        int successful = 0;
 
-        while (!successful) {
-            if (lock_vertex(d_locks, candidate)) { // lock "candidate"
+//        while (!successful) {
+//        while (1) {
+//            if (lock_vertex(d_locks, candidate)) { // lock "candidate"
+                lock_vertex(d_locks, candidate);
                 if (heaviest >= ws_[candidate]) { // test whether "heaviest" is still larger than previous offer to "candidate"
                     next_vertex = s_[candidate]; // save previous suitor of "candidate" as it is un-lodged by "current_vid"
                     s_[candidate] = current_vid; // "curernt_vid" become suitor of "candidate"
@@ -73,10 +89,12 @@ __device__ void set_suitor(int candidate, double heaviest, int current_vid, int 
                     unlock_vertex(d_locks, candidate); // unlock "candidate"
                     *finished = _FALSE;
                 }
-                successful = 1;
+//                successful = 1;
                 *new_vertex_to_care = current_vid; // 'current_vid' either contains original "current_vid" or previous suitor of "candidate"
-            }
-        }
+//		break;
+//            }
+//        }
+	
     }
 }
 
@@ -116,17 +134,19 @@ __device__ void find_Candidate(int W_OFF, int len_neighborlist, int *edge_list, 
 
         if ((weight_value == ws_[y])) {
             int successful = 0; // you can use successful for the rule of skip as well
-            while (!successful) { // until it gets the lock on y
-                if (lock_vertex(d_locks, y)) {
-                    if ((weight_value == ws_[y]) && (current_vid < s_[y])) { /* y always prefers candidate with higher id*/
+//            while (!successful) { // until it gets the lock on y
+//                if (lock_vertex(d_locks, y)) {
+                  lock_vertex(d_locks, y);
+                  if ((weight_value == ws_[y]) && (current_vid < s_[y])) { /* y always prefers candidate with higher id*/
                         successful = 1;
-                    }
-                    unlock_vertex(d_locks, y);
-                    successful += 1;
-                }
-            }
-            if (successful == 2)
-                continue;
+                  }
+                  unlock_vertex(d_locks, y);
+                  successful += 1;
+//                }
+//            }
+                  if (successful == 2) {
+                       continue;
+		  }
         }
         heaviest = weight_value;
         candidate = y;
@@ -314,6 +334,7 @@ void _fix_shift_matching(int n, int *M, int shift){
 
 vector<int>* approx_match_gpu_suitor(handles *h, CSR *A, CSR *W, vector<itype> *M, vector<double> *ws, vector<int> *mutex) {
 
+    _MPI_ENV;
     assert(W->on_the_device);
     int n = W->n;
     
@@ -330,13 +351,16 @@ vector<int>* approx_match_gpu_suitor(handles *h, CSR *A, CSR *W, vector<itype> *
 
     int shared_memory_size_per_block = (CHUNK_PER_WARP + 1) * (NTHREAD_PER_BLK / WARP_SIZE) * sizeof (int);
     // get dev_bit col to pass to compute_rows. This is sync
+    if(0) fprintf(stderr,"Task %d reached line %d in suitor (%s)\n",myid,__LINE__,__FILE__);
     
-    kernel_for_matching<<<nr_of_block, NTHREAD_PER_BLK, shared_memory_size_per_block>>>(n, W->row, M->val, ws->val, W->col, W->val, mutex->val, W->row_shift);
+    kernel_for_matching<<<nr_of_block, NTHREAD_PER_BLK, shared_memory_size_per_block>>>(n, W->row, M->val, ws->val, W->col, W->val, mutex->val, 0 /* W->row_shift */);
 
     compute_rows_to_rcv_CPU( A, NULL, _bitcol);
+    if(0) fprintf(stderr,"Task %d reached line %d in suitor (%s)\n",myid,__LINE__,__FILE__);
     Vector::free(_bitcol);
 
     cudaDeviceSynchronize();
+    if(0) fprintf(stderr,"Task %d reached line %d in suitor (%s)\n",myid,__LINE__,__FILE__);
     return M;
 }
 
@@ -350,6 +374,32 @@ T* makeArray(int size){
   assert(a != NULL);
   return a;
 }
+
+vector<int>* approx_match_gpu_suitor_v0(CSR *W, vector<itype> *M, vector<double> *ws, vector<int> *mutex) {
+
+	    assert(W->on_the_device);
+	        int n = W->n;
+
+		    Vector::fillWithValue(M, -1);
+		        Vector::fillWithValue(ws, 0.0);
+			    Vector::fillWithValue(mutex, 0);
+
+			        //
+			        int load_per_blk = CHUNK_PER_WARP * (NTHREAD_PER_BLK / WARP_SIZE); // NTHREAD_PER_BLK is multiple of 32
+
+				    int nr_of_block = (n + load_per_blk - 1) / load_per_blk;
+
+				        int shared_memory_size_per_block = (CHUNK_PER_WARP + 1) * (NTHREAD_PER_BLK / WARP_SIZE) * sizeof (int);
+					    // get dev_bit col to pass to compute_rows. This is sync
+
+    if(1) fprintf(stderr,"Task 0 reached line %d in suitor (%s)\n",__LINE__,__FILE__);
+					    kernel_for_matching<<<nr_of_block, NTHREAD_PER_BLK, shared_memory_size_per_block>>>(n, W->row, M->val, ws->val, W->col, W->val, mutex->val, 0 /* W->row_shift */);
+
+					        cudaDeviceSynchronize();
+    if(1) fprintf(stderr,"Task 0 reached line %d in suitor (%s)\n",__LINE__,__FILE__);
+						    return M;
+}
+
 
 template <typename T>
 vector<int>* approx_match_cpu_suitor(CSR *W_){

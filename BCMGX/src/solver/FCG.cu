@@ -1,10 +1,10 @@
-#pragma once
+//#pragma once
 
 #include "FCG.h"
 #include "basic_kernel/halo_communication/local_permutation.h"
 #include "basic_kernel/halo_communication/extern2.h"
 #include "basic_kernel/halo_communication/extern.h"
-#include "basic_kernel/matrix/vector.cu"
+#include "basic_kernel/matrix/vector.h"
 #include "prec_apply/GAMG_cycle.h"
 
 #include <string.h>
@@ -27,7 +27,7 @@ void FCG::initPreconditionContext(hierarchy *hrrch){
     PUSH_RANGE(__func__, 4)
 
     FCG::context.hrrch = hrrch;
-    int num_levels = hrrch->num_levels;
+    unsigned int num_levels = hrrch->num_levels;
 
     FCG::context.max_level_nums = num_levels;
     FCG::context.max_coarse_size = (itype*) malloc( num_levels * sizeof(int));
@@ -61,7 +61,7 @@ void FCG::initPreconditionContext(hierarchy *hrrch){
     POP_RANGE
 }
 
-void FCG::setHrrchBufferSize(hierarchy *hrrch){
+void FCG::setHrrchBufferSize(hierarchy *hrrch, int coarsesolver_type){
     int num_levels = hrrch->num_levels;
     assert(num_levels <= FCG::context.max_level_nums);
 
@@ -96,9 +96,16 @@ void FCG::setHrrchBufferSize(hierarchy *hrrch){
 
       }else{
         FCG::context.RHS_buffer->val[i]->n = n_i;
-
-        FCG::context.Xtent_buffer_local->val[i]->n =    (i == num_levels-1) ? n_i_full : n_i ;
-        FCG::context.Xtent_buffer_2_local->val[i]->n =  (i == num_levels-1) ? n_i_full : n_i ;
+//#if LOCAL_COARSEST==1
+        if (coarsesolver_type == 1){
+          FCG::context.Xtent_buffer_local->val[i]->n =    (i == num_levels-1) ? n_i_full : n_i ;
+          FCG::context.Xtent_buffer_2_local->val[i]->n =  (i == num_levels-1) ? n_i_full : n_i ;
+        }else{
+//#else
+          FCG::context.Xtent_buffer_local->val[i]->n = n_i;
+          FCG::context.Xtent_buffer_2_local->val[i]->n = n_i;
+        }
+//#endif
       }
     }
 }
@@ -233,7 +240,7 @@ void double_merged_axpy(vector<vtype> *x0, vector<vtype> *x1, vector<vtype> *y, 
   POP_RANGE
 }
 
-void preconditionApply(handles *h, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, vector<vtype> *rhs, vector<vtype> *x){
+void preconditionApply(handles *h, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, vector<vtype> *rhs, vector<vtype> *x, int coarsesolver_type){
   PUSH_RANGE(__func__,4)
     
   _MPI_ENV;
@@ -249,13 +256,13 @@ void preconditionApply(handles *h, bootBuildData *bootamg_data, boot *boot_amg, 
         if(DETAILED_TIMING && ISMASTER){
             TIME::start();
         }
-        FCG::setHrrchBufferSize(boot_amg->H_array[k]);
+        FCG::setHrrchBufferSize(boot_amg->H_array[k], coarsesolver_type);
 
         Vector::copyTo(RHS->val[0], rhs);
-        itype n, off;
+        //itype n, off;
         if(nprocs>1) {
-            n=boot_amg->H_array[k]->A_array[0]->n; 
-            off=boot_amg->H_array[k]->A_array[0]->row_shift;
+            //n=boot_amg->H_array[k]->A_array[0]->n; 
+            //off=boot_amg->H_array[k]->A_array[0]->row_shift;
             
             // -----------------------------------------------------
             Vector::copyTo(Xtent_local->val[0], x);
@@ -272,7 +279,7 @@ void preconditionApply(handles *h, bootBuildData *bootamg_data, boot *boot_amg, 
         
         
         // -------------------------------------------------------------------------------------------------
-        GAMG_cycle(h, k, bootamg_data, boot_amg, amg_cycle, RHS, Xtent_local, Xtent_2_local, 1);
+        GAMG_cycle(h, k, bootamg_data, boot_amg, amg_cycle, RHS, Xtent_local, Xtent_2_local, 1, coarsesolver_type);
         // -------------------------------------------------------------------------------------------------
 
             
@@ -281,16 +288,16 @@ void preconditionApply(handles *h, bootBuildData *bootamg_data, boot *boot_amg, 
         }
 
         
-        CSR *A = boot_amg->H_array[k]->A_array[0];
+        //CSR *A = boot_amg->H_array[k]->A_array[0];
         if(nprocs>1) {
-            if(A->halo.to_receive->val[0]<off) {
-                off=A->halo.to_receive->val[0];
-            }
-            if((A->halo.to_receive->val[(A->halo.to_receive_n)-1]-A->halo.to_receive->val[0])>(A->n)) {
-                n=(1+A->halo.to_receive->val[(A->halo.to_receive_n)-1]-A->halo.to_receive->val[0]);
-            } else {
-                n=A->n+(1+A->halo.to_receive->val[(A->halo.to_receive_n)-1]-A->halo.to_receive->val[0]);
-            }
+            //if(A->halo.to_receive->val[0]<off) {
+                //off=A->halo.to_receive->val[0];
+            //}
+            //if((A->halo.to_receive->val[(A->halo.to_receive_n)-1]-A->halo.to_receive->val[0])>(A->n)) {
+                //n=(1+A->halo.to_receive->val[(A->halo.to_receive_n)-1]-A->halo.to_receive->val[0]);
+            //} else {
+                //n=A->n+(1+A->halo.to_receive->val[(A->halo.to_receive_n)-1]-A->halo.to_receive->val[0]);
+            //}
             
             // -----------------------------------------------------
             Vector::copyTo(x, Xtent_local->val[0]);
@@ -317,12 +324,12 @@ void preconditionApply(handles *h, bootBuildData *bootamg_data, boot *boot_amg, 
 
 
 #include <cuda_profiler_api.h>
-vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vector<vtype> *rhs, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, int precon, int max_iter, double rtol, int *num_iter, bool precondition_flag){
+vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vector<vtype> *rhs, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, int precon, int max_iter, double rtol, int *num_iter, bool precondition_flag, int coarsesolver_type){
   PUSH_RANGE(__func__,3)
     
   _MPI_ENV;
   precon = 1;
-  itype n = A->n;
+  //itype n = A->n;
 
   Vectorinit_CNT
   vector<vtype> *v = Vector::init<vtype>(A->n, true, true);
@@ -378,7 +385,7 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
     }
 
     if (precondition_flag) {
-      preconditionApply(h, bootamg_data, boot_amg, amg_cycle, r, v);
+      preconditionApply(h, bootamg_data, boot_amg, amg_cycle, r, v, coarsesolver_type);
     } else {
       Vector::copyTo(v, r);
     }
@@ -474,7 +481,7 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
         }
         
         if (precondition_flag) {
-          preconditionApply(h, bootamg_data, boot_amg, amg_cycle, r, v);
+          preconditionApply(h, bootamg_data, boot_amg, amg_cycle, r, v, coarsesolver_type);
         } else {
           Vector::copyTo(v, r);
         }
@@ -523,7 +530,7 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
         }
         
         if (precondition_flag) {
-          preconditionApply(h, bootamg_data, boot_amg, amg_cycle, r, d);
+          preconditionApply(h, bootamg_data, boot_amg, amg_cycle, r, d, coarsesolver_type);
         } else {
           Vector::copyTo(d, r);
         }
@@ -629,4 +636,3 @@ vtype flexibileConjugateGradients_v3(CSR* A, handles *h, vector<vtype> *x, vecto
   POP_RANGE
   return l2_norm;
 }
-

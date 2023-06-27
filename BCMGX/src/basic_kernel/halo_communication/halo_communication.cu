@@ -33,26 +33,30 @@ void _count(itype nnz, itype *missing, itype *c){
     atomicAdd(c, 1);
 }
 
-void getMissing(CSR *A, vector<itype> **missing, CSR *R){
+void getMissing(CSR *A, vector<itype> **missing, CSR *R, gstype *row_shift){
   _MPI_ENV;
 
-  itype row_ns[nprocs], ends[nprocs];
-
+  stype row_ns[nprocs];
+  gstype ends[nprocs];
+  
   CHECK_MPI(
     MPI_Allgather(
       &A->n,
-      sizeof(itype),
+      sizeof(stype),
       MPI_BYTE,
-      &row_ns,
-      sizeof(itype),
+      row_ns,
+      sizeof(stype),
       MPI_BYTE,
       MPI_COMM_WORLD
     )
   );
 
   ends[0] = row_ns[0];
-  for(itype i=1; i<nprocs; i++)
+  row_shift[0]=0;
+  for(itype i=1; i<nprocs; i++) {
       ends[i] = row_ns[i] + ends[i-1];
+      row_shift[i]=row_shift[i-1]+ends[i-1];
+  }
 
   assert(ends[nprocs-1] == A->full_n);
 
@@ -105,7 +109,7 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R){
     nnz
   );
 
-  cudaFree(d_temp_storage);
+  MY_CUDA_CHECK( cudaFree(d_temp_storage) );
   d_temp_storage = NULL;
   temp_storage_bytes = 0;
 
@@ -178,18 +182,18 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R){
 #else
   // -----------------------------
 
-  itype mypfirstrow, myplastrow;
+  gstype mypfirstrow;
   mypfirstrow = A->row_shift; // (R != NULL) ? R->row_shift : A->row_shift;
-  myplastrow  = A->n + A->row_shift-1; // (R != NULL) ? (R->n + R->row_shift-1) : (A->n + A->row_shift-1);
         
   int uvs;
   int *getmct(itype *,itype,itype,itype,int *,int**,int*,int);
   int *ptr;
-  if(R != NULL)
-    ptr = getmct( R->col, R->nnz, mypfirstrow, myplastrow, &uvs, &(R->bitcol), &(R->bitcolsize), NUM_THR);
-  else
-    ptr = getmct( A->col, A->nnz, mypfirstrow, myplastrow, &uvs, &(A->bitcol), &(A->bitcolsize), NUM_THR);
-  
+  if(R != NULL) {
+    ptr = getmct( R->col, R->nnz, 0, A->n-1, &uvs, &(R->bitcol), &(R->bitcolsize), NUM_THR);
+  } else {
+    ptr = getmct( A->col, A->nnz, 0, A->n-1, &uvs, &(A->bitcol), &(A->bitcolsize), NUM_THR);
+  }
+
   vector<int> *_bitcol;
   if(uvs == 0){ 
     _bitcol = Vector::init<int>(1, true, false);
@@ -211,19 +215,26 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R){
   }
 
   if(uvs > 0){
-    itype *missing_flat = NULL;
-    missing_flat = (itype*)  malloc(sizeof(itype) * uvs);
+#if 0
+    itype cum_p_n_per_process[nprocs];
+    cum_p_n_per_process[0]=ends[0]-1;
+    for(int i=1; i<nprocs; i++){
+     cum_p_n_per_process[i]=cum_p_n_per_process[i-1] + ends[i];
+    }
+#endif
+    stype *missing_flat = NULL;
+    missing_flat = (stype*)  malloc(sizeof(stype) * uvs);
     CHECK_HOST(missing_flat);
-    memcpy(missing_flat, _bitcol->val, uvs * sizeof(itype));
-
-    itype J = 0, I = 0;
+    memcpy(missing_flat, _bitcol->val, uvs * sizeof(stype));
+    mypfirstrow = A->row_shift;
+    stype J = 0, I = 0;
     for(itype i=0; i<uvs; i++){
       itype j = missing_flat[i];
       //assert( (I+1)<((A->nnz/nprocs)*scalennzmiss) );
-      assert( (I+1)< ( ((A->nnz)*scalennzmiss)/nprocs ) );
-      
+      assert( (I+1)< ( (((long)(A->nnz)*(long)scalennzmiss))/((long)nprocs )) );
+#if 1    
       CHECK_AGAIN:
-      if(j >= ends[J]){
+      if((j+mypfirstrow) >= ends[J]){
 
         if(J != myid)
           missing[J]->n = I;
@@ -232,14 +243,22 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R){
         I = 0;
         goto CHECK_AGAIN;
       }
-      missing[J]->val[I] = j;
+#else
+      int bswhichprocess(itype *, int, itype);
+      J = bswhichprocess(cum_p_n_per_process, nprocs, j+mypfirstrow);
+      if(J > (nprocs-1)){
+         J=nprocs-1;
+      }
+#endif
+      if(J>=nprocs) { fprintf(stderr,"Task id %d: unexpected missing source :%d\n",myid,J); exit(1); }
+      //if(J<0 || J>=nprocs) { fprintf(stderr,"Task id %d: unexpected missing source :%d\n",myid,J); exit(1); }
+//      if(I>=(((A->nnz)*scalennzmiss)/nprocs) ) { fprintf(stderr,"Task id: unexpected I:%d, should be not greater than %d\n",myid,I, (((A->nnz)*scalennzmiss)/nprocs) ); exit(1); }
+      missing[J]->val[I] = j+(mypfirstrow-(J?ends[J-1]:0));
       I++;
     }
-
     if(I){
       missing[J]->n = I;
     }
-
     free(missing_flat);
   }
   
@@ -295,7 +314,6 @@ void _getToSendMask(itype n, itype *to_send, itype *to_send_mask, itype shift){
   to_send_mask[to_send[i]-shift] = i;
 }
 
-
 halo_info haloSetup(CSR *A, CSR *R=NULL){
   PUSH_RANGE(__func__, 5)
     
@@ -303,46 +321,58 @@ halo_info haloSetup(CSR *A, CSR *R=NULL){
   if ( R != NULL ) {    // product compatibility check
       assert( R->m == A->full_n );
   } else {
+      if(A->m != A->full_n) {
+	      fprintf(stderr,"Task %d, in haloSetup: A->m=%lu, A->full_n=%lu\n",myid,A->m,A->full_n);
+	      fflush(stderr);
+      }
       assert( A->m == A->full_n );
   }
-
-  vector<itype> **my_missing = (vector<itype>**) malloc(sizeof(vector<itype> *) * nprocs);
-  CHECK_HOST(my_missing);
-
-  for(int i=0; i<nprocs; i++){
-    //if ( ((A->nnz)*scalennzmiss)/(nprocs) == 0 ) {
-    //	fprintf(stderr, "A->nnz = %d, nprocs = %d, scalennzmiss = %d \n", A->nnz, nprocs, scalennzmiss);
-    //}	    
-    if(i != myid)
-      //my_missing[i] = Vector::init<itype>( ((A->nnz)/(nprocs)*scalennzmiss), true, false);
-      my_missing[i] = Vector::init<itype>( ((A->nnz)*scalennzmiss)/(nprocs), true, false);
-    else
-      my_missing[i] = NULL;
-  }
-
-  getMissing(A, my_missing, R);
-
-  itype total_n = 0;
-  for(itype i=0; i<nprocs; i++){
-      if(myid == i)
-        continue;
-    total_n += my_missing[i]->n;
-  }
-
+  vector<itype> **my_missing;
   int *sendcounts = (int*) malloc(sizeof(int)*nprocs);
   int *sdispls = (int*) malloc(sizeof(int)*nprocs);
   CHECK_HOST(sendcounts);
   CHECK_HOST(sdispls);
-
-
+  int *recvcounts = (int*) malloc(sizeof(int)*nprocs);
+  int *rdispls = (int*) malloc(sizeof(int)*nprocs);
+  CHECK_HOST(recvcounts);
+  CHECK_HOST(rdispls);
   vector<itype> *my_missing_flat = NULL;
+  vector<itype> *their_missing_flat = NULL;
+  itype their_missing_flat_total_n = 0;
+  itype total_n = 0;
+  gstype row_shift[nprocs];
+  halo_info hi;
+  
+  if(1 || (A->rows_to_get==NULL || R!=NULL)) {
+    my_missing = (vector<itype>**) malloc(sizeof(vector<itype> *) * nprocs);
+    CHECK_HOST(my_missing);
 
-  if(total_n > 0){
-    my_missing_flat = Vector::init<itype>(total_n, true, false);
-  }
+    for(int i=0; i<nprocs; i++){
+      //if ( ((A->nnz)*scalennzmiss)/(nprocs) == 0 ) {
+      //	fprintf(stderr, "A->nnz = %d, nprocs = %d, scalennzmiss = %d \n", A->nnz, nprocs, scalennzmiss);
+      //}	    
+      if(i != myid)
+	//my_missing[i] = Vector::init<itype>( ((A->nnz)/(nprocs)*scalennzmiss), true, false);
+	my_missing[i] = Vector::init<itype>( ((long)(A->nnz)*(long)(scalennzmiss))/((long)(nprocs)), true, false);
+      else
+	my_missing[i] = NULL;
+    }
+    
+    getMissing(A, my_missing, R,  row_shift);
 
-  itype shift = 0;
-  for(itype i=0; i<nprocs; i++){
+    for(itype i=0; i<nprocs; i++){
+      if(myid == i)
+        continue;
+      total_n += my_missing[i]->n;
+    }
+
+    if(total_n > 0){
+      my_missing_flat = Vector::init<itype>(total_n, true, false);
+      hi.to_receive = Vector::init<gstype>(total_n, true, false);      
+    }
+
+    itype shift = 0;
+    for(itype i=0; i<nprocs; i++){
 
       if(myid == i){
         sendcounts[i] = 0;
@@ -356,59 +386,66 @@ halo_info haloSetup(CSR *A, CSR *R=NULL){
       sendcounts[i] = my_missing[i]->n;
       sdispls[i] = shift;
       shift += my_missing[i]->n;
+    }
+
+    CHECK_MPI(
+	      MPI_Alltoall(
+			   sendcounts,
+			   1,
+			   ITYPE_MPI,
+			   recvcounts,
+			   1,
+			   ITYPE_MPI,
+			   MPI_COMM_WORLD
+			   )
+	      );
+
+    shift = 0;
+    for(itype i=0; i<nprocs; i++){
+      rdispls[i] = shift;
+      shift += recvcounts[i];
+      their_missing_flat_total_n += recvcounts[i];
+    }
+
+    if(their_missing_flat_total_n > 0)
+      their_missing_flat = Vector::init<itype>(their_missing_flat_total_n, true, false);
+
+    CHECK_MPI(
+	      MPI_Alltoallv(
+			    my_missing_flat != NULL ? my_missing_flat->val : NULL,
+			    sendcounts,
+			    sdispls,
+			    ITYPE_MPI,
+			    their_missing_flat != NULL ? their_missing_flat->val : NULL,
+			    recvcounts,
+			    rdispls,
+			    ITYPE_MPI,
+			    MPI_COMM_WORLD
+			    )
+	      );
   }
-
-  int *recvcounts = (int*) malloc(sizeof(int)*nprocs);
-  CHECK_HOST(recvcounts);
-  CHECK_MPI(
-    MPI_Alltoall(
-      sendcounts,
-      1,
-      ITYPE_MPI,
-      recvcounts,
-      1,
-      ITYPE_MPI,
-      MPI_COMM_WORLD
-    )
-  );
-
-  int *rdispls = (int*) malloc(sizeof(int)*nprocs);
-  CHECK_HOST(rdispls);
-
-
-  shift = 0;
-  itype their_missing_flat_total_n = 0;
-  for(itype i=0; i<nprocs; i++){
-    rdispls[i] = shift;
-    shift += recvcounts[i];
-    their_missing_flat_total_n += recvcounts[i];
-  }
-
-  vector<itype> *their_missing_flat = NULL;
-  if(their_missing_flat_total_n > 0)
-    their_missing_flat = Vector::init<itype>(their_missing_flat_total_n, true, false);
-
-  CHECK_MPI(
-    MPI_Alltoallv(
-      my_missing_flat != NULL ? my_missing_flat->val : NULL,
-      sendcounts,
-      sdispls,
-      ITYPE_MPI,
-      their_missing_flat != NULL ? their_missing_flat->val : NULL,
-      recvcounts,
-      rdispls,
-      ITYPE_MPI,
-      MPI_COMM_WORLD
-    )
-  );
-
-  halo_info hi;
 
   hi.init = true;
-  hi.to_receive = my_missing_flat;
-  hi.to_receive_n = total_n;
-  hi.to_receive_counts = sendcounts;
-  hi.to_receive_spls = sdispls;
+  if(1 || (A->rows_to_get==NULL || R!=NULL)) {
+    hi.to_receive_n = total_n;
+    int k=0;
+    for(int i=0; i<nprocs; i++) {
+    	    for(int j=0; j<sendcounts[i]; j++) {
+	        	    hi.to_receive->val[k]=my_missing_flat->val[k]+row_shift[i];
+			    k++;
+	    }
+    }
+    hi.to_receive_counts = sendcounts;
+    hi.to_receive_spls = sdispls;
+  } else {
+    for(int i=0; i<nprocs; i++) {
+        A->halo.to_receive_counts[i]=A->rows_to_get->rcounts2[i]/sizeof(itype);
+        A->halo.to_receive_spls[i]=A->rows_to_get->displr2[i]/sizeof(itype);
+    }
+    hi.to_receive = Vector::init<gstype>(A->rows_to_get->countall, true, false);
+    hi.to_receive_n = A->rows_to_get->countall;
+    hi.to_receive->val=A->rows_to_get->whichprow;
+  }
 
   hi.what_to_receive = NULL;
   hi.to_receive_d = NULL;
@@ -420,16 +457,27 @@ halo_info haloSetup(CSR *A, CSR *R=NULL){
     VectorcopyToDevice_CNT
     hi.to_receive_d = Vector::copyToDevice(hi.to_receive);
   }
-
-  hi.to_send = their_missing_flat;
-  hi.to_send_n = their_missing_flat_total_n;
-  hi.to_send_counts = recvcounts;
-  hi.to_send_spls = rdispls;
+  if(1 || (A->rows_to_get==NULL || R!=NULL)) {
+    hi.to_send = their_missing_flat;
+    hi.to_send_n = their_missing_flat_total_n;
+    hi.to_send_counts = recvcounts;
+    hi.to_send_spls = rdispls;
+  } else {
+    for(int i=0; i<nprocs; i++) {
+        A->halo.to_send_counts[i]=A->rows_to_get->scounts2[i]/sizeof(itype);
+        A->halo.to_send_spls[i]=A->rows_to_get->displs2[i]/sizeof(itype);
+	their_missing_flat_total_n+=A->halo.to_send_counts[i];
+    }
+    hi.to_send = Vector::init<itype>(their_missing_flat_total_n, true, false);  
+    hi.to_send_n = their_missing_flat_total_n;
+    hi.to_send->val = A->rows_to_get->rcvprow;
+  }
 
   hi.what_to_send_d = NULL;
   hi.what_to_send = NULL;
 
   if(hi.to_send_n > 0){
+
     cudaMalloc_CNT
     CHECK_DEVICE(  cudaMallocHost((void**)&hi.what_to_send, sizeof(vtype)*hi.to_send_n) );
 
@@ -440,27 +488,28 @@ halo_info haloSetup(CSR *A, CSR *R=NULL){
     hi.to_send_d = Vector::copyToDevice(hi.to_send);
   }
 
-
+  if(1 || (A->rows_to_get==NULL || R!=NULL)) {
   for(itype i=0; i<nprocs; i++){
     if(my_missing[i] != NULL)
       Vector::free(my_missing[i]);
   }
   std::free(my_missing);
-
+  if(my_missing_flat != NULL) 
+     Vector::free(my_missing_flat);  
+  }
   POP_RANGE
   return hi;
 }
 
-
 __global__
-void _getToSend(itype n, vtype *x, vtype *what_to_send, itype *to_send){
+void _getToSend(itype n, vtype *x, vtype *what_to_send, itype *to_send, itype shift){
   itype i = blockDim.x * blockIdx.x + threadIdx.x;
 
   if(i >= n)
     return;
 
   itype j = to_send[i];
-  what_to_send[i] = x[j];
+  what_to_send[i] = x[j+shift];
 }
 
 __global__
@@ -471,11 +520,11 @@ void _getToSend_new(itype n, vtype *x, vtype *what_to_send, itype *to_send, ityp
     return;
 
   itype j = to_send[i];
-  what_to_send[i] = x[j - shift];
+  what_to_send[i] = x[j /* - shift */];
 }
 
 __global__
-void setReceivedWithMask(itype n, vtype *x, vtype *received, itype *receive_map, itype shift){
+void setReceivedWithMask(itype n, vtype *x, vtype *received, gstype *receive_map, itype shift){
   itype i = blockDim.x * blockIdx.x + threadIdx.x;
 
   if(i >= n)
@@ -483,22 +532,22 @@ void setReceivedWithMask(itype n, vtype *x, vtype *received, itype *receive_map,
 
   itype j = receive_map[i];
   vtype val = received[i];
-  x[j] = val;
+  x[j /* +shift */] = val;
 }
 
 __global__
-void setReceivedWithMask_new(itype n, vtype *x, vtype *received, itype *receive_map, itype shift){
+void setReceivedWithMask_new(itype n, vtype *x, vtype *received, gstype *receive_map, itype shift){
   itype i = blockDim.x * blockIdx.x + threadIdx.x;
 
   if(i >= n)
     return;
 
-  itype j = receive_map[i];
-  vtype val = received[i];
+  //itype j = receive_map[i];
+  //vtype val = received[i];
 }
 
 #define SYNCSOL_TAG 4321
-#define MAXNTASKS 1024
+#define MAXNTASKS 4096
 
 void halo_sync(halo_info hi, CSR *A, vector<vtype> *x, bool local_flag){
   _MPI_ENV;
@@ -521,7 +570,7 @@ void halo_sync(halo_info hi, CSR *A, vector<vtype> *x, bool local_flag){
     if (local_flag)
         _getToSend_new<<<gb.g, gb.b>>>(hi.to_send_d->n, x->val, hi.what_to_send_d, hi.to_send_d->val, A->row_shift);
     else
-        _getToSend<<<gb.g, gb.b>>>(hi.to_send_d->n, x->val, hi.what_to_send_d, hi.to_send_d->val);
+        _getToSend<<<gb.g, gb.b>>>(hi.to_send_d->n, x->val, hi.what_to_send_d, hi.to_send_d->val, A->row_shift);
     CHECK_DEVICE( cudaMemcpyAsync(hi.what_to_send, hi.what_to_send_d, hi.to_send_n*sizeof(vtype), cudaMemcpyDeviceToHost, sync_stream) );
 #else
     vector<vtype> *x_host = Vector::copyToHost(x);
@@ -582,7 +631,7 @@ void halo_sync(halo_info hi, CSR *A, vector<vtype> *x, bool local_flag){
             for(int i=0; i<nprocs; i++){
                 int end = start + hi.to_receive_counts[i];
                 for(int j=start; j<end; j++){
-                    itype v = hi.to_receive->val[j];
+                    gstype v = hi.to_receive->val[j];
                     x_host->val[v] = hi.what_to_receive[j];
                 }
                 start = end;
@@ -631,7 +680,7 @@ void halo_sync_stream(halo_info hi, CSR *A, vector<vtype> *x, cudaStream_t strea
   if(hi.to_send_n){
     gridblock gb = gb1d(hi.to_send_n, BLOCKSIZE);
     
-    _getToSend<<<gb.g, gb.b, 0, stream>>>(hi.to_send_d->n, x->val, hi.what_to_send_d, hi.to_send_d->val);
+    _getToSend<<<gb.g, gb.b, 0, stream>>>(hi.to_send_d->n, x->val, hi.what_to_send_d, hi.to_send_d->val, A->row_shift);
     CHECK_DEVICE( cudaMemcpyAsync(hi.what_to_send, hi.what_to_send_d, hi.to_send_n*sizeof(vtype), cudaMemcpyDeviceToHost, stream) );
   }
 

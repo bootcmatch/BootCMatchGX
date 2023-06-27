@@ -28,11 +28,11 @@ namespace MemoryPool{
 
     void freeContext(){
       for(int i=0; i<local_pools; i++){
-        cudaFree(&MemoryPool::local[i]);
+        CHECK_DEVICE( cudaFree(local[i]) );
       }
 
       for(int i=0; i<global_pools; i++){
-        cudaFree(&MemoryPool::global[i]);
+        CHECK_DEVICE( cudaFree(global[i]) );
       }
     }
 }

@@ -17,6 +17,7 @@ struct params{
   int max_levels;
   int cycle_type;
   int coarse_solver;
+  int coarsesolver_type;
   int relax_type;
   int prerelax_sweeps;
   int postrelax_sweeps;
@@ -24,6 +25,7 @@ struct params{
   double rtol;
   int relaxnumber_coarse;
   int mem_alloc_size;
+  int error;
 };
 
 struct hierarchy{

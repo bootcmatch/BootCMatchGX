@@ -25,10 +25,10 @@ void GAMGcycle::freeContext(){
     Vector::free(GAMGcycle::Res_buffer);
 }
 
-void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, vectorCollection<vtype> *Rhs, vectorCollection<vtype> *Xtent, vectorCollection<vtype> *Xtent_2, int l){
+void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, vectorCollection<vtype> *Rhs, vectorCollection<vtype> *Xtent, vectorCollection<vtype> *Xtent_2, int l, int coarsesolver_type ){
     
   _MPI_ENV;
-
+//  static int flow=0;
   hierarchy *hrrc = boot_amg->H_array[k];
   int relax_type = amg_cycle->relax_type;
 
@@ -36,7 +36,7 @@ void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, 
   int coarse_solver = amg_data->coarse_solver;
 
   if(VERBOSE > 0)
-    std::cout << "GAMGCycle: start of level " << l << "\n";
+    std::cout << "GAMGCycle: start of level " << l << " Max level " << hrrc->num_levels << "\n";
   
 
   if(l == hrrc->num_levels){
@@ -44,8 +44,8 @@ void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, 
     if(DETAILED_TIMING && ISMASTER){
         TIME::start();
     }
-
-#if LOCAL_COARSEST == 1
+//#if LOCAL_COARSEST == 1
+    if (coarsesolver_type == 1){
     relaxCoarsest(
         h,                                 
         amg_cycle->relaxnumber_coarse,      
@@ -55,10 +55,9 @@ void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, 
         amg_cycle->relax_weight,            
         Xtent->val[l-1],                    
         &Xtent_2->val[l-1],
-        hrrc->A_array[l-1]->n
-    );
-    
-#else
+        hrrc->A_array[l-1]->n);
+     }else{
+//#else
     relax(
         h,
         amg_cycle->relaxnumber_coarse,
@@ -68,10 +67,13 @@ void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, 
         coarse_solver,
         amg_cycle->relax_weight,
         Xtent->val[l-1], 
-        &Xtent_2->val[l-1]
-    );
-#endif
-    
+        &Xtent_2->val[l-1] );
+
+     }
+
+
+//#endif
+   
     if(DETAILED_TIMING && ISMASTER){
         TOTAL_SOLRELAX_TIME += TIME::stop();
     }
@@ -82,10 +84,9 @@ void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, 
     if(DETAILED_TIMING && ISMASTER){
         TIME::start();
     }
-    
     relax(
       h,
-      amg_cycle->prerelax_number,
+      amg_cycle->prerelax_number*((amg_cycle->cycle_type!=4)?1:(1<<(l-1))),
       l-1,
       hrrc->A_array[l-1], hrrc->D_array[l-1], hrrc->M_array[l-1],
       Rhs->val[l-1],
@@ -121,7 +122,7 @@ void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, 
     }
     
     CSRm::CSRVector_product_adaptive_miniwarp_new(h->cusparse_h0, hrrc->A_array[l-1], Xtent->val[l-1], Res, -1., 1.);
-        
+    
     if(VERBOSE > 1){
         vtype tnrm = Vector::norm_MPI(h->cublas_h, Res);
         std::cout << "Residual at level " << l << " " << tnrm << "\n";
@@ -131,13 +132,13 @@ void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, 
     if(nprocs == 1){
         CSRm::CSRVector_product_adaptive_miniwarp_new(h->cusparse_h0, hrrc->R_array[l-1], Res, Rhs->val[l], 1., 0.);
     }else{
-#if LOCAL_COARSEST == 1
+//#if LOCAL_COARSEST == 1
+      if (coarsesolver_type == 1){
     // before coarsets
         if(l == hrrc->num_levels-1){
             CSR *R = hrrc->R_array[l-1];
             vector<vtype> *cust_null = NULL;    // BUG
             vector<vtype> *Res_full = aggregateVector(Res, hrrc->A_array[l-1]->full_n, cust_null );
-
             assert( hrrc->R_array[l-1]->n == hrrc->R_array[l-1]->full_n );
             CSRm::CSRVector_product_adaptive_miniwarp(h->cusparse_h0, R, Res_full, Rhs->val[l], 1., 0.);
                 
@@ -150,16 +151,19 @@ void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, 
             vector<vtype> *Res_full = Xtent_2->val[l-1];
             cudaMemcpy(Res_full->val, Res->val, hrrc->A_array[l-1]->n*sizeof(vtype), cudaMemcpyDeviceToDevice);
             
-            /* fù BUG */
-                
             CSRm::CSRVector_product_adaptive_miniwarp_new(h->cusparse_h0, R_local, Res_full, Rhs->val[l], 1., 0.);
         }
-#else
+      }else{
+//#else
         CSR *R_local = hrrc->R_local_array[l-1];
-        vector<vtype> *Res_full = aggregateVector(Res, hrrc->A_array[l-1]->full_n, Xtent_2->val[l-1]);
+        assert(hrrc->A_array[l-1]->full_n == R_local->m);
+
+        vector<vtype> *Res_full = Xtent_2->val[l-1];
+        cudaMemcpy(Res_full->val, Res->val, hrrc->A_array[l-1]->n*sizeof(vtype), cudaMemcpyDeviceToDevice);
         
         CSRm::CSRVector_product_adaptive_miniwarp_new(h->cusparse_h0, R_local, Res_full, Rhs->val[l], 1., 0.);
-#endif
+	  }
+//#endif
     }
     
     
@@ -173,31 +177,37 @@ void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, 
     }
 
     for(int i=1; i<=amg_cycle->num_grid_sweeps[l-1]; i++){
-      GAMG_cycle(h, k, bootamg_data, boot_amg, amg_cycle, Rhs, Xtent, Xtent_2, l+1);
+      GAMG_cycle(h, k, bootamg_data, boot_amg, amg_cycle, Rhs, Xtent, Xtent_2, l+1, coarsesolver_type);
       if(l == hrrc->num_levels-1)
         break;
     }
 
-
     if(DETAILED_TIMING && ISMASTER){
             TIME::start();
     }
-    vector<vtype> *Xtent0_local = NULL;
     if(nprocs == 1) {
         CSRm::CSRVector_product_adaptive_miniwarp(h->cusparse_h0, hrrc->P_array[l-1], Xtent->val[l], Xtent->val[l-1], 1., 1.);
     } else {
-        vector<vtype> *local_x = NULL;
-        vector<vtype> *Xtent0_local = NULL;
+        // before coarsets
         assert( hrrc->P_local_array[l-1]->halo.init == 1 );
         halo_sync(hrrc->P_local_array[l-1]->halo, hrrc->P_local_array[l-1], Xtent->val[l], false);
-
         assert (hrrc->P_local_array[l-1]->shrinked_flag == 1);
+//#if LOCAL_COARSEST==1
+     if (coarsesolver_type == 1){
         if (l == hrrc->num_levels-1) {
-            assert( (hrrc->A_array[l]->n == hrrc->A_array[l]->full_n) && (Xtent->val[l]->n == hrrc->A_array[l]->full_n) );
-            CSRm::CSRVector_product_adaptive_miniwarp(h->cusparse_h0, hrrc->P_local_array[l-1], Xtent->val[l], Xtent->val[l-1], 1., 1.);
+            assert( (hrrc->A_array[l]->n == hrrc->A_array[l]->full_n) && (Xtent->val[l]->n == hrrc->A_array[l]->full_n) );  
+            CSRm::CSRVector_product_adaptive_miniwarp(h->cusparse_h0, hrrc->P_local_array[l-1], Xtent->val[l], Xtent->val[l-1], 1., 1.); 
         } else {
+//#endif
             CSRm::CSRVector_product_adaptive_miniwarp_new(h->cusparse_h0, hrrc->P_local_array[l-1], Xtent->val[l], Xtent->val[l-1], 1., 1.);
+//#if LOCAL_COARSEST==1
         }
+      }
+//#endif
+      if ( coarsesolver_type == 0 ){
+            CSRm::CSRVector_product_adaptive_miniwarp_new(h->cusparse_h0, hrrc->P_local_array[l-1], Xtent->val[l], Xtent->val[l-1], 1., 1.);
+      }
+   
     }
     
     if(DETAILED_TIMING && ISMASTER){
@@ -218,7 +228,7 @@ void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, 
     // postsmoothing steps
     relax(
       h,
-      amg_cycle->postrelax_number,
+      amg_cycle->postrelax_number*((amg_cycle->cycle_type!=4)?1:(1<<(l-1))),
       l-1,
       hrrc->A_array[l-1], hrrc->D_array[l-1], hrrc->M_array[l-1],
       Rhs->val[l-1],

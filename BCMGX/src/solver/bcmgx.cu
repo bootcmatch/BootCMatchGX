@@ -49,8 +49,13 @@ vector<vtype>* bcmgx(CSR *Alocal, vector<vtype> *rhs, const params p, bool preco
 // ------------------ custom_cudamalloc --------------------
   // Parametri di inizializazione con unico blocco: [ 9, 5 ]
   CustomCudaMalloc::init((Alocal->nnz)*5, (Alocal->nnz)*3);
+  //CustomCudaMalloc::init((Alocal->nnz)*5, (Alocal->nnz)*3);
+
+  //CustomCudaMalloc::init((Alocal->nnz)*2, (Alocal->nnz)*2, 1);
   CustomCudaMalloc::init((Alocal->nnz)*1, (Alocal->nnz)*1, 1);
-  CustomCudaMalloc::init((Alocal->nnz)*3, (Alocal->nnz)*2, 2);
+  
+  CustomCudaMalloc::init((Alocal->nnz)*3, (Alocal->nnz)*3, 2);
+  //CustomCudaMalloc::init((Alocal->nnz)*3, (Alocal->nnz)*2, 2);
 // ---------------------------------------------------------
 
   if(ISMASTER)
@@ -76,23 +81,19 @@ vector<vtype>* bcmgx(CSR *Alocal, vector<vtype> *rhs, const params p, bool preco
     AMG::ApplyData::print(amg_cycle);
   }
 
-  Relax::initContext(Alocal->full_n);
+  Relax::initContext(Alocal->n);
   GAMGcycle::initContext(Alocal->n);
 
   float boot_time;
 
   // start bootstrap process
-  CHECK_MPI(
-		  MPI_Barrier(MPI_COMM_WORLD)
-	   );
+  CHECK_MPI( MPI_Barrier(MPI_COMM_WORLD) );
   if(ISMASTER)
     TIME::start();
   TIMER_START;
 
   boot *boot_amg = Bootstrap::bootstrap(h, bootamg_data, amg_cycle, p, precondition_flag);
-  CHECK_MPI(
-		  MPI_Barrier(MPI_COMM_WORLD)
-	   );
+  CHECK_MPI( MPI_Barrier(MPI_COMM_WORLD) );
   
   if(ISMASTER){
 //    cudaDeviceSynchronize();
@@ -133,8 +134,11 @@ vector<vtype>* bcmgx(CSR *Alocal, vector<vtype> *rhs, const params p, bool preco
 
     if(nprocs > 1){
 
-    #if LOCAL_COARSEST == 1
-
+    //#if LOCAL_COARSEST == 1
+    if (p.coarsesolver_type == 1){
+	  if(H->A_array[levelc]->col_shifted) {
+           CSRm::shift_cols(H->A_array[levelc], -(H->A_array[levelc]->col_shifted));
+	  }
         CSR * h_Ac_local = CSRm::copyToHost(H->A_array[levelc]);
         CSR *h_Ac = join_MatrixMPI_all(h_Ac_local);
 
@@ -146,16 +150,20 @@ vector<vtype>* bcmgx(CSR *Alocal, vector<vtype> *rhs, const params p, bool preco
 
         // todo wasted computation
         relaxPrepare(h, levelc, H->A_array[levelc], H, amg_data, amg_data->coarse_solver);
-
+	  if(H->R_array[levelc-1]->col_shifted) {
+           CSRm::shift_cols(H->R_array[levelc-1], -(H->R_array[levelc-1]->col_shifted));
+	  }
         h_Ac_local = CSRm::copyToHost(H->R_array[levelc-1]);
         h_Ac = join_MatrixMPI_all(h_Ac_local);
         CSRm::free(h_Ac_local);
         H->R_array[levelc-1] = CSRm::copyToDevice(h_Ac);
         CSRm::free(h_Ac);
 
-        //  PICO
-    //     shrink_col(H->R_array[levelc-1], H->A_array[levelc-1]);  /* levelc == H->num_levels - 1 */
-    #endif
+	  if(H->P_array[levelc-1]->col_shifted) {
+           CSRm::shift_cols(H->P_array[levelc-1], -(H->P_array[levelc-1]->col_shifted));
+	  }
+    //#endif
+    }
 
         for(int i=0; i<H->num_levels-1; i++){
           H->R_local_array[i] = H->R_array[i];
@@ -163,11 +171,14 @@ vector<vtype>* bcmgx(CSR *Alocal, vector<vtype> *rhs, const params p, bool preco
         }
 
       itype hn;
-    #if LOCAL_COARSEST == 1
+    //#if LOCAL_COARSEST == 1
+    if ( p.coarsesolver_type == 1){
         hn = H->num_levels-1;
-    #else
+    }else{
+    //#else
         hn = H->num_levels;
-    #endif
+    //#endif
+    }
 
       // pre-computation required for overlapped smoother (matrix/vector product) this can be performed during the building phase by using a differen stream
     #ifdef OVERLAPPED_SMO
@@ -204,7 +215,7 @@ vector<vtype>* bcmgx(CSR *Alocal, vector<vtype> *rhs, const params p, bool preco
     p.itnlim, 
     p.rtol, 
     &num_iter,
-    precondition_flag);
+    precondition_flag, p.coarsesolver_type);
 
   CHECK_MPI( MPI_Barrier(MPI_COMM_WORLD) );
   

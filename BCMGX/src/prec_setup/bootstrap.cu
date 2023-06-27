@@ -5,7 +5,7 @@
 
 namespace Bootstrap{
 
-    void innerIterations(handles *h, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle){
+    void innerIterations(handles *h, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, int coarsesolver_type){
 
       buildData *amg_data = bootamg_data->amg_data;
       CSR *A = amg_data->A;
@@ -26,7 +26,7 @@ namespace Bootstrap{
       vtype conv_ratio;
 
       for(int i=1; i<=bootamg_data->solver_it; i++){
-        preconditionApply(h, bootamg_data, boot_amg, amg_cycle, rhs, x);
+        preconditionApply(h, bootamg_data, boot_amg, amg_cycle, rhs, x, coarsesolver_type);
         normnew = CSRm::vectorANorm(h->cublas_h, A, x);
         conv_ratio = normnew / normold;
         normold = normnew;

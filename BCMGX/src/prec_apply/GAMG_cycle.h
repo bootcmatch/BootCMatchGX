@@ -22,4 +22,5 @@ namespace GAMGcycle{
   void freeContext();
 }
 
-void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, vectorCollection<vtype> *Rhs, vectorCollection<vtype> *Xtent, vectorCollection<vtype> *Xtent_2, int l);
+void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, vectorCollection<vtype> *Rhs, vectorCollection<vtype> *Xtent, vectorCollection<vtype> *Xtent_2, int l, int coarsesolver_type);
+//void GAMG_cycle(handles *h, int k, bootBuildData *bootamg_data, boot *boot_amg, applyData *amg_cycle, vectorCollection<vtype> *Rhs, vectorCollection<vtype> *Xtent, vectorCollection<vtype> *Xtent_2, int l);

@@ -11,8 +11,8 @@
 
 
 struct halo_info{
-  vector<itype> *to_receive;
-  vector<itype> *to_receive_d;
+  vector<gstype> *to_receive;
+  vector<gstype> *to_receive_d;
   int to_receive_n;
   int *to_receive_counts;
   int *to_receive_spls;
@@ -46,7 +46,7 @@ typedef struct rows_info{
   int *displs2;
   unsigned int *rcvcntp;
   itype *rcvprow;
-  itype *whichprow;
+  gstype *whichprow;
   itype *rcvpcolxrow;  
 } rows_to_get_info;
 
@@ -55,25 +55,26 @@ typedef struct rows_info{
 typedef struct{
   stype nnz; // number of non-zero
   stype n; // rows number
-  stype m; // columns number
+  gstype m; // columns number
   stype shrinked_m; // columns number for the shrinked matrix
 
-  stype full_n;
-  stype full_m;
+  gstype full_n;
+  gstype full_m;
 
   bool on_the_device;
   bool is_symmetric;
   bool shrinked_flag;
   bool custom_alloced;
-  itype shrinked_firstrow;
-  itype shrinked_lastrow;
+  gsstype col_shifted;
+  gstype shrinked_firstrow;
+  gstype shrinked_lastrow;
   
   vtype *val; // array of nnz values
   itype *col; // array of the column index
   itype *row; // array of the pointer of the first nnz element of the rows
   itype *shrinked_col; // array of the shrinked column indexes
   
-  itype row_shift;
+  gstype row_shift;
   int* bitcol;
   int bitcolsize;
   int post_local;
@@ -95,7 +96,7 @@ namespace CSRm{
   CSR** split(CSR *A, int nprocs);
 
   int choose_mini_warp_size(CSR *A);
-  CSR* init(stype n, stype m, stype nnz, bool allocate_mem, bool on_the_device, bool is_symmetric, itype full_n, itype row_shift=0);
+  CSR* init(stype n, gstype m, stype nnz, bool allocate_mem, bool on_the_device, bool is_symmetric, gstype full_n, gstype row_shift=0);
   void partialAlloc(CSR *A, bool init_row, bool init_col, bool init_val);
   void free(CSR *A);
   void free_rows_to_get(CSR *A);
@@ -115,7 +116,7 @@ namespace CSRm{
   CSR* CSRCSR_product_cuSPARSE(cusparseHandle_t handle, CSR *A, CSR *B, bool transA=false, bool transB=false);
   vector<vtype>* diag(CSR *A);
   CSR *T(cusparseHandle_t cusparse_h, CSR* A);
-  CSR *T_multiproc(cusparseHandle_t cusparse_h, CSR* A, itype n_rows, bool used_by_solver);
+  CSR *T_multiproc(cusparseHandle_t cusparse_h, CSR* A, stype n_rows, bool used_by_solver);
   CSR* CSRCSR_product(cusparseHandle_t handle, CSR *A, CSR *B, bool transA=false, bool transB=false);
   vector<vtype>* CSRVector_product_adaptive_miniwarp(cusparseHandle_t cusparse_h, CSR *A, vector<vtype> *x, vector<vtype> *y, vtype alpha=1., vtype beta=0.);
   vector<vtype>* shifted_CSRVector_product_adaptive_miniwarp(CSR *A, vector<vtype> *x, vector<vtype> *y, itype shift, vtype alpha=1., vtype beta=0.);
@@ -135,7 +136,7 @@ namespace CSRm{
   void checkMatching(vector<itype> *v_);
   void checkColumnsOrder(CSR *A);
   bool equal(CSR *_A, CSR *_B);
-  void shift_cols(CSR* A, itype shift);
+  void shift_cols(CSR* A, gsstype shift);
   
   vector<vtype>* CSRVector_product_adaptive_miniwarp_new(cusparseHandle_t cusparse_h, CSR *A, vector<vtype> *local_x, vector<vtype> *w, vtype alpha=1., vtype beta=0.);
 

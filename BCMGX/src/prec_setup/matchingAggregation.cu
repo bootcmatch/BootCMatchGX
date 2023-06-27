@@ -138,15 +138,16 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
   TIMER_DEF;
 
   CSR *Ai_ = A, *Ai = NULL;
+
   CSR *Ri_ = NULL;
   vector<vtype> *wi_ = *w, *wi = NULL;
 
   double size_coarse, size_precoarse;
   double coarse_ratio;
 
-  
   for(int i=0; i<amg_data->sweepnumber; i++){
     CSR *Pi_;
+    if (0 && myid==0) fprintf(stderr,"Task %d reached line %d \n",myid,__LINE__);
 //     printf ("[%d] (i+1 < amg_data->sweepnumber ? false : true): %d < %d ? --> %d\n", myid, i+1, amg_data->sweepnumber, (i+1 < amg_data->sweepnumber ? false : true));
 
     if(DETAILED_TIMING && ISMASTER){
@@ -155,6 +156,8 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
       TIMER_START;
     }
     matchingPairAggregation(h, Ai_, wi_, &Pi_, &Ri_, (i==0)); /* routine with the real work. It calls the suitor procedure */
+    if (0 && myid==0) fprintf(stderr,"Task %d reached line %d \n",myid,__LINE__);
+    
     if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();
 //       TOTAL_MATCHINGPAIR_TIME += TIME::stop();
@@ -171,9 +174,16 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
     // --------------- PICO ------------------
     CSR *AP;
     AP  = nsparseMGPU_commu_new(h, Ai_, Pi_, false);
+    CSRm::shift_cols(Ri_, -AP->row_shift);
+    Ri_->col_shifted=-AP->row_shift;  
     Ai = nsparseMGPU_noCommu_new(h, Ri_, AP);  //, (i+1 < amg_data->sweepnumber ? false : true));
+    if(myid!=0 && Ai->col_shifted==0) {
+     CSRm::shift_cols(Ai, -(Ai->row_shift) );
+     Ai->col_shifted=-(Ai->row_shift);
+    }
+	       
+    if (0 && myid==0) fprintf(stderr,"Task %d reached line %d \n",myid,__LINE__);
     // ---------------------------------------
-    
         
     if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();
@@ -208,7 +218,7 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
 //          TIME::start();
          TIMER_START;
     }
-    CSRm::shifted_CSRVector_product_adaptive_miniwarp2(Ri_, wi_, wi, Ai_->row_shift);
+    CSRm::shifted_CSRVector_product_adaptive_miniwarp2(Ri_, wi_, wi, 0 /* Ai_->row_shift */);
     if(DETAILED_TIMING && ISMASTER){
         cudaDeviceSynchronize();
 //         TOTAL_SHIFTED_CSRVEC += TIME::stop();
@@ -236,8 +246,8 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
          TIMER_START;
       }
 
-      CSRm::shift_cols(*P, -(Pi_->row_shift) );
-      (*P)->m = Pi_->n;
+      CSRm::shift_cols(*P, -(Pi_->row_shift) );      
+      (*P)->m = (unsigned long)Pi_->n;
       csrlocinfo Pinfo1p; 
       Pinfo1p.fr=0;
       Pinfo1p.lr=Pi_->n;
@@ -248,7 +258,6 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
       CSR *tmpP = *P; 
       *P = nsparseMGPU(*P, Pi_, &Pinfo1p, brk_flag);
       CSRm::free(tmpP);
- 
       if(DETAILED_TIMING && ISMASTER){
         cudaDeviceSynchronize();
 //         TOTAL_MUL_TIME += TIME::stop();
@@ -274,7 +283,6 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
          TOTAL_OTHER_TIME += TIMER_ELAPSED;
       }
     }
-
     // ------------- custom cudaMalloc -------------
     //Vector::free(wi_);
     std::free(wi_);
@@ -286,10 +294,16 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
 
     Ai_ = Ai;
     wi_ = wi;
+    if(myid!=0 && Ai_->col_shifted==0) {
+    	CSRm::shift_cols(Ai_, -(Ai_->row_shift) );
+        Ai_->col_shifted=-(Ai_->row_shift);
+    }
   }
 
   *w = wi;
+  if (0 && myid==0) fprintf(stderr,"Task %d reached line %d \n",myid,__LINE__);
   if(Ri_ == NULL){
+
     if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();
 //       TIME::start();
@@ -297,28 +311,29 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
     }
     //*R = CSRm::T(h->cusparse_h0, *P);
     if(nprocs > 1){
-      itype ms[nprocs], m_shifts[nprocs];
+      itype ms[nprocs];
+      gstype  m_shifts[nprocs];
       // send columns numbers to each process
       CHECK_MPI(
         MPI_Allgather(
           &Ai->n,
           sizeof(itype),
           MPI_BYTE,
-          &ms,
+          ms,
           sizeof(itype),
           MPI_BYTE,
           MPI_COMM_WORLD
         )
       );
-      itype tot_m = 0;
+      gstype tot_m = 0;
 
       for(int i=0; i<nprocs; i++){
         m_shifts[i] = tot_m;
         tot_m += ms[i];
       }
       CSRm::shift_cols(*P, -m_shifts[myid]);
-   
-      itype swp_m = (*P)->m;
+      
+      gstype swp_m = (*P)->m;
       if (myid == nprocs-1){
           (*P)->m -= m_shifts[myid];
       }else{
@@ -327,8 +342,8 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
       *R = CSRm::T_multiproc(h->cusparse_h0, *P, Ai->n, true);
     
       (*P)->m = swp_m;
-      CSRm::shift_cols(*P, m_shifts[myid]);  
-
+      CSRm::shift_cols(*P, m_shifts[myid]);
+      
       //(*R)->row += m_shifts[myid];
       //(*R)->n = Ai->n;
       (*R)->m = (*P)->full_n;
@@ -347,8 +362,14 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
   }else{
     *R = Ri_;
   }
-
+  
   POP_RANGE
+  
+  if(myid!=0 && Ai->col_shifted==0) {
+     CSRm::shift_cols(Ai, -(Ai->row_shift) );
+     Ai->col_shifted=-(Ai->row_shift);
+  }
+
   return Ai;
 }
 
@@ -365,6 +386,7 @@ hierarchy* adaptiveCoarsening(handles *h, buildData *amg_data, const params p, b
       TIMER_START;
   }
   CSR *A = amg_data->A;
+
   // init memory pool
   MemoryPool::initContext(A->full_n, A->n);
   iPtemp1 = NULL;
@@ -406,6 +428,7 @@ hierarchy* adaptiveCoarsening(handles *h, buildData *amg_data, const params p, b
   CSR *P = NULL, *R = NULL;
   hierarchy *hrrch = AMG::Hierarchy::init(amg_data->maxlevels + 1);
   hrrch->A_array[0] = A;
+  
   if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();
 //       TOTAL_MEM_TIME += TIME::stop();
@@ -413,13 +436,15 @@ hierarchy* adaptiveCoarsening(handles *h, buildData *amg_data, const params p, b
       TOTAL_MEM_TIME += TIMER_ELAPSED;
   }
 
-  // cumpute comunication patterns for solver
+  // compute comunication patterns for solver
   if(nprocs > 1){
     if(DETAILED_TIMING && ISMASTER){
 //       TIME::start();
         TIMER_START;
     }
     halo_info hi = haloSetup(hrrch->A_array[0], NULL);
+//    printf("Task %d, halo done for %x level=%d\n",myid,hrrch->A_array[0],0);
+    
     if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();
 //       TOTAL_SETUP_TIME += TIME::stop();
@@ -449,12 +474,13 @@ hierarchy* adaptiveCoarsening(handles *h, buildData *amg_data, const params p, b
 
   if(precondition_flag){
     for(level=1; level < amg_data->maxlevels;){
-
+      if(0 && myid==0) fprintf(stderr,"Task %d entering level %d\n",myid,level);
       if(DETAILED_TIMING && ISMASTER){
 //           TIME::start();
           TIMER_START;
       }
       hrrch->A_array[level] = matchingAggregation(h, amg_data, hrrch->A_array[level-1], &w_temp, &P, &R, level-1);
+      if(0 && myid==0) fprintf(stderr,"Task %d out of matchingAggregation\n",myid);
       if(DETAILED_TIMING && ISMASTER){
         cudaDeviceSynchronize();
 //         TOTAL_MATCH_TIME += TIME::stop();
@@ -467,7 +493,13 @@ hierarchy* adaptiveCoarsening(handles *h, buildData *amg_data, const params p, b
 //           TIME::start();
             TIMER_START;
         }
+	if(myid!=0 && hrrch->A_array[level]->col_shifted==0) {
+  	      CSRm::shift_cols(hrrch->A_array[level], -(hrrch->A_array[level]->row_shift) );
+	      hrrch->A_array[level]->col_shifted=-(hrrch->A_array[level]->row_shift);
+	}
         halo_info hi = haloSetup(hrrch->A_array[level], NULL);
+//        printf("Task %d, halo done for %x, level=%d\n",myid,hrrch->A_array[level],level);
+        if(0 && myid==0) fprintf(stderr,"Task %d out of haloSetup\n",myid);
         if(DETAILED_TIMING && ISMASTER){
             cudaDeviceSynchronize();
 //             TOTAL_SETUP_TIME += TIME::stop();
@@ -483,6 +515,7 @@ hierarchy* adaptiveCoarsening(handles *h, buildData *amg_data, const params p, b
            TIMER_START;
        }
        relaxPrepare(h, level, hrrch->A_array[level], hrrch, amg_data);
+       if(0 && myid==0)  fprintf(stderr,"Task %d out of relaxPrepare\n",myid);
        if(DETAILED_TIMING && ISMASTER){
           cudaDeviceSynchronize();
 //           TOTAL_RELAX_TIME += TIME::stop();
@@ -496,12 +529,25 @@ hierarchy* adaptiveCoarsening(handles *h, buildData *amg_data, const params p, b
       
       // --------------- PICO ------------------
       bool shrink_col(CSR*, CSR*);
+//      printf("Task %d, shrinking col of matrix %x, level %d\n",myid,hrrch->A_array[level-1],level-1);    
       shrink_col(hrrch->A_array[level-1], NULL);
+      if(myid!=0 && hrrch->P_array[level-1]->col_shifted==0) {
+           CSRm::shift_cols(hrrch->P_array[level-1], -(hrrch->A_array[level]->row_shift));
+	   hrrch->P_array[level-1]->col_shifted=-(hrrch->A_array[level]->row_shift);
+      }
       shrink_col(hrrch->P_array[level-1], hrrch->A_array[level]);
-      if (level != hrrch->num_levels-1)
-        shrink_col(hrrch->R_array[level-1], hrrch->A_array[level-1]);
-      // ---------------------------------------
       
+      if (level != hrrch->num_levels-1) {
+        if(myid!=0 && hrrch->R_array[level-1]->col_shifted==0) {
+	   hrrch->R_array[level-1]->bitcol=NULL;
+	   hrrch->R_array[level-1]->bitcolsize=0; 
+           CSRm::shift_cols(hrrch->R_array[level-1], -(hrrch->A_array[level-1]->row_shift));
+     	   hrrch->R_array[level-1]->col_shifted=-(hrrch->A_array[level-1]->row_shift);
+        }
+
+        shrink_col(hrrch->R_array[level-1], hrrch->A_array[level-1]);
+      } 
+      // ---------------------------------------
 
       if(nprocs > 1){
 
@@ -510,6 +556,8 @@ hierarchy* adaptiveCoarsening(handles *h, buildData *amg_data, const params p, b
             TIMER_START;
         }
         halo_info hi = haloSetup(hrrch->A_array[level], hrrch->P_array[level-1]);
+        if(0 && myid==0) fprintf(stderr,"Task %d out of haloSetup 2\n",myid);
+	
         if(DETAILED_TIMING && ISMASTER){
             cudaDeviceSynchronize();
 //             TOTAL_SETUP_TIME += TIME::stop();
@@ -527,6 +575,7 @@ hierarchy* adaptiveCoarsening(handles *h, buildData *amg_data, const params p, b
             TIMER_START;
         }
         halo_info hi = haloSetup(hrrch->A_array[level-1], hrrch->R_array[level-1]); // BUG: haloSetup(hrrch->R_array[level-1], hrrch->A_array[level-1]);
+        if(0 && myid==0) fprintf(stderr,"Task %d out of haloSetup 3\n",myid);
         if(DETAILED_TIMING && ISMASTER){
             cudaDeviceSynchronize();
 //             TOTAL_SETUP_TIME += TIME::stop();
@@ -546,11 +595,19 @@ hierarchy* adaptiveCoarsening(handles *h, buildData *amg_data, const params p, b
       if(size_coarse <= amg_data->ftcoarse * amg_data->maxcoarsesize){
         break;
       }
+      if(0 && myid==0) fprintf(stderr,"Task %d end level %d\n",myid,level);
     }
+//    printf("Task %d, shrinking col of matrix %x, level %d\n",myid,hrrch->A_array[level-1],level-1);    
+//#if LOCAL_COARSEST==0
+    if( p.coarsesolver_type == 0){
+      shrink_col(hrrch->A_array[level-1], NULL);
+    }
+//#endif
   } else {
     bool shrink_col(CSR*, CSR*);
     shrink_col(hrrch->A_array[level], NULL);
   }
+  if(0 && myid==0) fprintf(stderr,"Task %d end loop on levels\n",myid);
 
   if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();

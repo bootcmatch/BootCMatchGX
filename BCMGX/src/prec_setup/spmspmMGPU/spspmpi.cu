@@ -7,6 +7,12 @@
 #include "basic_kernel/matrix/matrixIO.h"
 #include "basic_kernel/halo_communication/local_permutation.h"
 
+#ifdef NSP2_NSPARSE
+#include "nsp2.h"
+#else
+#include "nsparse.h"
+#endif
+
 #include "utility/function_cnt.h"
 
 __global__
@@ -141,7 +147,7 @@ itype merge(itype a[], itype b[], itype c[], itype n1, itype n2) {
     return k;
 }
 
-int bswhichprocess(itype *P_n_per_process, int nprocs, itype e){
+int bswhichprocess(gsstype *P_n_per_process, int nprocs, gsstype e){
   unsigned int low, high, medium;
   low=0;
   high=nprocs;
@@ -178,13 +184,21 @@ CSR* nsparseMGPU(CSR *Alocal, CSR *Pfull, csrlocinfo *Plocal, bool used_by_solve
   mat_p.d_col = Pfull->col;
   mat_p.d_val = Pfull->val;
 
+  //spgemm_csrseg_kernel_hash(&mat_a, &mat_p, &mat_c, Plocal, used_by_solver);
+#ifdef NSP2_NSPARSE
+  nsp2_spgemm_kernel_hash(&mat_a, &mat_p, &mat_c, used_by_solver);
+  //nsp2_spgemm_kernel_hash(&mat_a, &mat_p, &mat_c);
+#else
   spgemm_csrseg_kernel_hash(&mat_a, &mat_p, &mat_c, Plocal, used_by_solver);
+#endif
+
 	       
   mat_c.M=mat_a.M;
   mat_c.N=mat_p.N;
 
   
-  CSR* C = CSRm::init(mat_c.M, mat_c.N, mat_c.nnz, false, true, false, Alocal->full_n, Alocal->row_shift);
+  CSR* C = CSRm::init(mat_c.M, Pfull->m, mat_c.nnz, false, true, false, Alocal->full_n, Alocal->row_shift);
+
   C->row = mat_c.d_rpt;
   C->col = mat_c.d_col;
   C->val = mat_c.d_val;
@@ -196,14 +210,14 @@ CSR* nsparseMGPU(CSR *Alocal, CSR *Pfull, csrlocinfo *Plocal, bool used_by_solve
 }
 
 
-
 vector<int> *get_missing_col( CSR *Alocal, CSR *Plocal ){
   _MPI_ENV;
+  stype myplastrow;
   if(nprocs == 1){ 
      vector<int> *_bitcol = Vector::init<int>(1, true, false);
      return _bitcol; 
   }
-  itype mypfirstrow, myplastrow;
+
 // ----------------- NOTE temp 4 debug -------------------------------
 //   int static Ncall = 0;
 //   Ncall ++;
@@ -214,16 +228,14 @@ vector<int> *get_missing_col( CSR *Alocal, CSR *Plocal ){
   int *getmct(itype *,itype,itype,itype,int *,int**,int*,int);
   
   if ( Plocal != NULL ){
-    mypfirstrow = Plocal->row_shift;
-    myplastrow  = Plocal->n + Plocal->row_shift-1;
+    myplastrow  = Plocal->n -1;
   }else{
-    mypfirstrow = Alocal->row_shift;
-    myplastrow  = Alocal->n + Alocal->row_shift-1;
+    myplastrow  = Alocal->n -1;
   }// P_n_per_process[i]: number of rows that process i have of matrix P 
 
   if(Alocal->nnz==0) { return NULL; }
   int uvs;
-  int *ptr = getmct( Alocal->col, Alocal->nnz, mypfirstrow, myplastrow, &uvs, &(Alocal->bitcol), &(Alocal->bitcolsize), NUM_THR);
+  int *ptr = getmct( Alocal->col, Alocal->nnz, 0, myplastrow, &uvs, &(Alocal->bitcol), &(Alocal->bitcolsize), NUM_THR);
   if(uvs == 0){ 
      vector<int> *_bitcol = Vector::init<int>(1, true, false);
      return _bitcol; 
@@ -236,7 +248,7 @@ vector<int> *get_missing_col( CSR *Alocal, CSR *Plocal ){
 
 vector<int> *get_shrinked_col( CSR *Alocal, CSR *Plocal ){
   _MPI_ENV;
-  itype mypfirstrow, myplastrow;
+  stype myplastrow;
   // ----------------- NOTE temp 4 debug -------------------------------
 //   int static Ncall = 0;
 //   Ncall ++;
@@ -244,31 +256,34 @@ vector<int> *get_shrinked_col( CSR *Alocal, CSR *Plocal ){
   // -------------------------------------------------------------------
   
   //gridblock gb;
-  int *getmct_4shrink(itype *,itype,itype,itype,bool,int*,int**,int*,int*,int);
+  int *getmct_4shrink(itype *,itype,itype,itype,int,int*,int**,int*,int*,int);
   
   if ( Plocal != NULL ){
-    mypfirstrow = Plocal->row_shift;
-    myplastrow  = Plocal->n + Plocal->row_shift-1;
+    myplastrow  = Plocal->n -1;
   }else{
-    mypfirstrow = Alocal->row_shift;
-    myplastrow  = Alocal->n + Alocal->row_shift-1;
-  }// P_n_per_process[i]: number of rows that process i have of matrix P 
-  Alocal->shrinked_firstrow = mypfirstrow;
-  Alocal->shrinked_lastrow  = myplastrow;
+    myplastrow  = Alocal->n -1;
+  }// P_n_per_process[i]: number of rows that process i have of matrix P
   
   if(Alocal->nnz==0) { return NULL; }
   int uvs;
-  bool first_or_last = ((myid == 0) || (myid == (nprocs-1)));
-  int *ptr = getmct_4shrink( Alocal->col, Alocal->nnz, mypfirstrow, myplastrow, first_or_last, &uvs, &(Alocal->bitcol), &(Alocal->bitcolsize), &(Alocal->post_local), NUM_THR);
+  int first_or_last = 0;
+  if(myid == 0) {
+     first_or_last=-1;
+  }
+  if(myid == (nprocs-1)) {
+     first_or_last=1;
+  }
+  
+  int *ptr = getmct_4shrink( Alocal->col, Alocal->nnz, 0, myplastrow, first_or_last, &uvs, &(Alocal->bitcol), &(Alocal->bitcolsize), &(Alocal->post_local), NUM_THR);
   vector<int> *_bitcol = Vector::init<int>(uvs, false, true);
   _bitcol->val=ptr;
   return _bitcol;
 }
 
 
-vector<int> *get_shrinked_col( CSR *Alocal, itype firstlocal, itype lastlocal ){
+vector<int> *get_shrinked_col( CSR *Alocal, stype firstlocal, stype lastlocal ){
   _MPI_ENV;
-  itype mypfirstrow, myplastrow;
+  stype myplastrow;
   // ----------------- NOTE temp 4 debug -------------------------------
 //   int static Ncall = 0;
 //   Ncall ++;
@@ -276,33 +291,39 @@ vector<int> *get_shrinked_col( CSR *Alocal, itype firstlocal, itype lastlocal ){
   // -------------------------------------------------------------------
   
   //gridblock gb;
-  int *getmct_4shrink(itype *,itype,itype,itype,bool,int*,int**,int*,int*,int);
+  int *getmct_4shrink(itype *,itype,itype,itype,int,int*,int**,int*,int*,int);
   
-  mypfirstrow = firstlocal;
   myplastrow  = lastlocal;
   
-  Alocal->shrinked_firstrow = mypfirstrow;
   Alocal->shrinked_lastrow  = myplastrow;
   
   if(Alocal->nnz==0) { return NULL; }
   int uvs;
-  bool first_or_last = ((myid == 0) || (myid == (nprocs-1)));
-  int *ptr = getmct_4shrink( Alocal->col, Alocal->nnz, mypfirstrow, myplastrow, first_or_last, &uvs, &(Alocal->bitcol), &(Alocal->bitcolsize), &(Alocal->post_local), NUM_THR);
+  int first_or_last = 0;
+  if(myid == 0) {
+     first_or_last=-1;
+  }
+  if(myid == (nprocs-1)) {
+     first_or_last=1;
+  }
+  
+  int *ptr = getmct_4shrink( Alocal->col, Alocal->nnz, 0, myplastrow, first_or_last, &uvs, &(Alocal->bitcol), &(Alocal->bitcolsize), &(Alocal->post_local), NUM_THR);
   vector<int> *_bitcol = Vector::init<int>(uvs, false, true);
   _bitcol->val=ptr;
   return _bitcol;
 }
-
-
 
 void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
   PUSH_RANGE(__func__, 6)
     
   _MPI_ENV;
-
+  static int cnt=0;
+  
   if(nprocs == 1){ return ; }
 
   Alocal->rows_to_get = (rows_to_get_info *) Malloc( sizeof(rows_to_get_info) );
+  
+  gstype row_shift[nprocs], ends[nprocs];
 
   itype *P_n_per_process;
   P_n_per_process = (itype*) Malloc(sizeof(itype)*nprocs);
@@ -313,6 +334,7 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
   }else{
     CHECK_MPI( MPI_Allgather( &Alocal->n, sizeof(itype), MPI_BYTE, P_n_per_process, sizeof(itype), MPI_BYTE, MPI_COMM_WORLD ) );
   }// P_n_per_process[i]: number of rows that process i owns of matrix P 
+//  fprintf(stderr,"Task %d reached line %d in compute_rows_to_receive (%s)\n",myid,__LINE__,__FILE__);
 
   itype *whichprow=NULL, *rcvpcolxrow=NULL, *rcvprow=NULL;
 
@@ -345,16 +367,21 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
 
   itype *aofwhichproc=(itype *)Malloc(sizeof(itype)*cntothercol); 
 
-  itype cum_p_n_per_process[nprocs];
+  gsstype cum_p_n_per_process[nprocs];
+  row_shift[0]=0;
+  ends[0] = P_n_per_process[0];  
   cum_p_n_per_process[0]=P_n_per_process[0]-1;
   for(int i=1; i<nprocs; i++){
-     cum_p_n_per_process[i]=cum_p_n_per_process[i-1] + P_n_per_process[i];
+     cum_p_n_per_process[i]=cum_p_n_per_process[i-1] + (gstype) P_n_per_process[i];
+     row_shift[i]=row_shift[i-1]+ (gstype) P_n_per_process[i-1];
+     ends[i] = ends[i-1]+ ((gstype)  P_n_per_process[i]);
   }
+  assert(ends[nprocs-1] == Alocal->full_n);
 
   itype countall=0;
   
   for(j=0; j<cntothercol; j++) {
-    whichproc = bswhichprocess(cum_p_n_per_process, nprocs, othercol[sothercol][j]);
+    whichproc = bswhichprocess(cum_p_n_per_process, nprocs, othercol[sothercol][j]+Alocal->row_shift);
     if(whichproc > (nprocs-1)){
       whichproc=nprocs-1;
     }
@@ -369,15 +396,19 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
   }
   countp[nprocs-1]=0;
   if(countall>0) {
-     whichprow=(itype *)Malloc(sizeof(itype)*countall); 
+     whichprow=(itype *)Malloc(sizeof(itype)*countall);
+     Alocal->rows_to_get->whichprow =(gstype *)Malloc(sizeof(gstype)*countall);
      rcvpcolxrow=(itype *)Malloc(sizeof(itype)*countall);
   }
 
+//  fprintf(stderr,"Task %d reached line %d in compute_rows_to_receive (%s)\n",myid,__LINE__,__FILE__);
   Alocal->rows_to_get->rows2bereceived=countall;
+
 
   for(j=0; j<cntothercol; j++) {
       whichproc=aofwhichproc[j];
-      whichprow[offset[whichproc]+countp[whichproc]]=othercol[sothercol][j];
+      whichprow[offset[whichproc]+countp[whichproc]]=othercol[sothercol][j]+
+		                                     (Alocal->row_shift-(whichproc?ends[whichproc-1]:0));
       countp[whichproc]++;
   }
   free(aofwhichproc);
@@ -395,25 +426,48 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
      fprintf(stderr,"self rcvcntp should be zero! %d\n",myid);
      exit(1);
   }
-  countall=0;
-  for(i=0; i<nprocs; i++) {
+  
+  if(Alocal->halo.init==true && 0) {
+   countall=0;
+   for(i=0; i<nprocs; i++) {
+        displr[i]=Alocal->halo.to_send_spls[i]*sizeof(itype);
+        displs[i]=Alocal->halo.to_receive_spls[i]*sizeof(itype);
+        displs2[i]=Alocal->halo.to_send_spls[i]*sizeof(itype);
+        displr2[i]=Alocal->halo.to_receive_spls[i]*sizeof(itype);
+        scounts[i]=rcounts2[i]=Alocal->halo.to_receive_counts[i]*sizeof(itype);
+        rcounts[i]=scounts2[i]=Alocal->halo.to_send_counts[i]*sizeof(itype);
+	countall+=rcvcntp[i];
+   }
+  } else {
+   countall=0;
+   for(i=0; i<nprocs; i++) {
     rcounts2[i]=scounts[i]=countp[i]*sizeof(itype);
     displr2[i] =displs[i]=((i==0)?0:(displs[i-1]+scounts[i-1]));
-
+    
     scounts2[i]=rcounts[i]=rcvcntp[i]*sizeof(itype);
     displs2[i] =displr[i]=((i==0)?0:(displr[i-1]+rcounts[i-1]));
     countall+=rcvcntp[i];
-  }
+   }
 
-  if(countall>0) {
+   if(countall>0) {
      rcvprow=(itype *)Malloc(sizeof(itype)*countall);
-  }
+   }
 
-  if( MPI_Alltoallv(whichprow,scounts,displs,MPI_BYTE,rcvprow,rcounts,displr,MPI_BYTE,MPI_COMM_WORLD) != MPI_SUCCESS) {
+   if( MPI_Alltoallv(whichprow,scounts,displs,MPI_BYTE,rcvprow,rcounts,displr,MPI_BYTE,MPI_COMM_WORLD) != MPI_SUCCESS) {
      fprintf(stderr,"Error in MPI_Alltoallv of whichprow rows\n");
      exit(1);
+   }
   }
-
+#if 1
+  int k=0;
+  for(int i=0; i<nprocs; i++) {
+    	    for(int j=0; j<(scounts[i]/sizeof(itype)); j++) {
+	        	    Alocal->rows_to_get->whichprow[k]=whichprow[k]+row_shift[i];
+			    k++;
+	    }
+  }
+  free(whichprow);
+#endif
   memset(scounts, 0, nprocs*sizeof(int));
   memset(displs, 0, nprocs*sizeof(int));
   vector<itype> *nnz_per_row_shift = NULL;
@@ -443,13 +497,17 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
       displs[i]=((i==0)?0:(displs[i-1]+scounts[i-1]));
     }
   }
-
-
   //Alocal->rows_to_get->total_row_to_rec = total_row_to_rec;
   Alocal->rows_to_get->nnz_per_row_shift = nnz_per_row_shift;
-  Alocal->rows_to_get->countall = countall;
-  Alocal->rows_to_get->rcvprow = rcvprow;
-  Alocal->rows_to_get->whichprow = whichprow;
+  Alocal->rows_to_get->countall = countall /* Alocal->hi.to_receive_n */;
+
+
+  if(Alocal->halo.init==true && 0) {  
+     Alocal->rows_to_get->rcvprow = Alocal->halo.to_send->val;
+/*     Alocal->rows_to_get->whichprow = Alocal->halo.to_receive->val; */
+  } else {
+     Alocal->rows_to_get->rcvprow = rcvprow;
+  }
   Alocal->rows_to_get->rcvpcolxrow = rcvpcolxrow;
   Alocal->rows_to_get->displr = displr;
   Alocal->rows_to_get->displs = displs;
@@ -460,11 +518,12 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
   Alocal->rows_to_get->displr2 = displr2;
   Alocal->rows_to_get->rcvcntp = rcvcntp;
   Alocal->rows_to_get->P_n_per_process = P_n_per_process;
-
   //if (Alocal->rows_to_get->total_row_to_rec != Alocal->rows_to_get->rows2bereceived){
   //  printf(" !!! --- WARNING --- !!! : total_row_to_rec != rows2bereceived -- %d != %d -- %d \n", Alocal->rows_to_get->total_row_to_rec, Alocal->rows_to_get->rows2bereceived, cntothercol);
   //  exit(1);
   //}
+  cnt++;
+//  fprintf(stderr,"Task %d reached line %d in compute_rows_to_receive (%s)\n",myid,__LINE__,__FILE__);
 
   POP_RANGE
   return ;
@@ -501,12 +560,14 @@ CSR* nsparseMGPU_noCommu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_
   PUSH_RANGE(__func__, 6)
     
   _MPI_ENV;
-  gridblock gb;
-  itype mypfirstrow = Plocal->row_shift;
-  itype myplastrow  = Plocal->n + Plocal->row_shift-1;
-  
-  
+  //gridblock gb;
+  //itype mypfirstrow = Plocal->row_shift;
+  //itype myplastrow  = Plocal->n + Plocal->row_shift-1;
+
+
+
   CSR* Alocal_ = get_shrinked_matrix(Alocal, Plocal);
+
   cudaDeviceSynchronize();
 
   csrlocinfo Pinfo1p;
@@ -518,8 +579,8 @@ CSR* nsparseMGPU_noCommu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_
   
   
   cudaDeviceSynchronize();
+
   CSR *C = nsparseMGPU(Alocal_, Plocal, &Pinfo1p, used_by_solver);
-  
   Alocal_->col = NULL;
   Alocal_->row = NULL;
   Alocal_->val = NULL;
@@ -573,10 +634,10 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
   scounts = Alocal->rows_to_get->scounts;
 
   itype mycolp = Plocal->nnz;   // number of nnz stored by the process
-  itype Pm = Plocal->m;         // number of columns in P  
-  itype mypfirstrow = Plocal->row_shift;
-  itype myplastrow  = Plocal->n + Plocal->row_shift-1;
-  itype Pn = Plocal->full_n;
+  gstype Pm = (unsigned long)Plocal->m;         // number of columns in P  
+  gstype mypfirstrow = Plocal->row_shift;
+  gstype myplastrow  = Plocal->n + Plocal->row_shift-1;
+  //itype Pn = Plocal->full_n;
 
   vector<itype> *nnz_per_row_shift = NULL;
   nnz_per_row_shift = Alocal->rows_to_get->nnz_per_row_shift;
@@ -588,7 +649,8 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
 
   memset(rcounts, 0, nprocs*sizeof(int)); 
 
-  itype *whichprow=NULL, *rcvpcolxrow=NULL, *rcvprow=NULL;
+  gstype *whichprow=NULL;
+  itype *rcvpcolxrow=NULL, *rcvprow=NULL;
   rcvprow = Alocal->rows_to_get->rcvprow;
   whichprow = Alocal->rows_to_get->whichprow;
   rcvpcolxrow = Alocal->rows_to_get->rcvpcolxrow;
@@ -622,8 +684,9 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
 //         CHECK_DEVICE( cudaMemcpyAsync(dev_rcvprow, rcvprow, dev_nnz_per_row_shift->n * sizeof(itype), cudaMemcpyHostToDevice, h->stream1));
         // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>> sostituito da >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         if (dev_nnz_per_row_shift->n > nnz_per_row_shift_n_stat) {
-            if (nnz_per_row_shift_n_stat > 0)
-                cudaFree(dev_rcvprow_stat);
+            if (nnz_per_row_shift_n_stat > 0) {
+                MY_CUDA_CHECK( cudaFree(dev_rcvprow_stat) );
+            }
             nnz_per_row_shift_n_stat = dev_nnz_per_row_shift->n;
             cudaMalloc_CNT
             CHECK_DEVICE( cudaMalloc( (void**) &dev_rcvprow_stat, nnz_per_row_shift_n_stat * sizeof(itype)) );
@@ -646,11 +709,11 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
         gb = gb1d(dev_nnz_per_row_shift->n, NUM_THR);
         // -------- TEST ---------
 //         _getColVal<<<gb.g, gb.b, 0, h->stream1>>>( dev_nnz_per_row_shift->n, dev_rcvprow, dev_nnz_per_row_shift->val, Plocal->row, Plocal->col, Plocal->val, dev_col2send, dev_val2send, mypfirstrow );
-        _getColVal<<<gb.g, gb.b, 0, h->stream1>>>( dev_nnz_per_row_shift->n, dev_rcvprow_stat, dev_nnz_per_row_shift->val, Plocal->row, Plocal->col, Plocal->val, dev_col2send, dev_val2send, mypfirstrow );
+        _getColVal<<<gb.g, gb.b, 0, h->stream1>>>( dev_nnz_per_row_shift->n, dev_rcvprow_stat, dev_nnz_per_row_shift->val, Plocal->row, Plocal->col, Plocal->val, dev_col2send, dev_val2send, 0 /* mypfirstrow */);
         // -----------------------
         cudaStreamSynchronize( h->stream1 );
         // -------- TEST ---------
-//         cudaFree(dev_rcvprow);
+//         MY_CUDA_CHECK( cudaFree(dev_rcvprow) );
         // -----------------------
     }
 
@@ -669,7 +732,7 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
   }
  
   itype nzz_pre_local = 0;
-  itype rows_pre_local = 0;     //PICO
+  //itype rows_pre_local = 0;     //PICO
   itype rows2bereceived = Alocal->rows_to_get->rows2bereceived; 
   
 //   vector<itype> *dev_P_nnz_map = NULL;
@@ -678,13 +741,13 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
     // we have rows from other process
     bool flag = true;
 //     itype *dev_whichproc = NULL;
-    itype r = 0;
+    gsstype r = 0;
 
     vector<itype> *P_nnz_map = Vector::init<itype>(rows2bereceived, true, false);
     k = 0;
     int whichproc;
 
-    itype cum_p_n_per_process[nprocs];
+    gsstype cum_p_n_per_process[nprocs];
     cum_p_n_per_process[0]=P_n_per_process[0]-1;
     for(int j=1; j<nprocs; j++){
      cum_p_n_per_process[j]=cum_p_n_per_process[j-1] + P_n_per_process[j];
@@ -699,7 +762,7 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
   	  // after local add shift
       if(r > mypfirstrow && flag){
           nzz_pre_local = k;
-          rows_pre_local = i;
+          //rows_pre_local = i;
           flag = false;
       }
       k += rcvpcolxrow[i];
@@ -708,7 +771,7 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
 
     if(flag){
       nzz_pre_local = P_nnz_map->val[rows2bereceived-1];
-      rows_pre_local = rows2bereceived;     //PICO
+      //rows_pre_local = rows2bereceived;     //PICO
     }
 
 //     dev_P_nnz_map = Vector::copyToDevice(P_nnz_map);
@@ -772,7 +835,7 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
     cudaError_t err;
     if(completedP_n > completedP_stat_n) {
         if (completedP_stat_n > 0) {
-            cudaFree(completedP_stat_row);
+            MY_CUDA_CHECK( cudaFree(completedP_stat_row) );
         }
         completedP_stat_n = completedP_n;
         cudaMalloc_CNT
@@ -781,8 +844,8 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
     }
     if(completedP_nnz > completedP_stat_nnz) {
         if (completedP_stat_nnz > 0) {
-            cudaFree(completedP_stat_col);
-            cudaFree(completedP_stat_val);
+            MY_CUDA_CHECK( cudaFree(completedP_stat_col) );
+            MY_CUDA_CHECK( cudaFree(completedP_stat_val) );
         }
         completedP_stat_nnz = completedP_nnz;
         cudaMalloc_CNT
@@ -863,8 +926,6 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
   Plocalinfo.col=completedP->col + nzz_pre_local;
   Plocalinfo.val=Plocal->val;
 #endif
-
-  
 
   CSR* Alocal_ = get_shrinked_matrix(Alocal, Plocal);
   

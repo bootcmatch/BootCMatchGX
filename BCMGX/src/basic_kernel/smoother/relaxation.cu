@@ -258,6 +258,7 @@ vector<vtype>* jacobi_adaptive_miniwarp(cusparseHandle_t cusparse_h, cublasHandl
 
 void jacobi_adaptive_miniwarp_coarsest(cusparseHandle_t cusparse_h, cublasHandle_t cublas_h, int k, CSR *A, vector<vtype> *u, vector<vtype> **u_, vector<vtype> *f, vector<vtype> *D, vtype relax_weight){
 
+  _MPI_ENV;
   assert(f != NULL);
   vector<vtype> *swap_temp;
 
@@ -290,6 +291,7 @@ void jacobi_adaptive_miniwarp_coarsest(cusparseHandle_t cusparse_h, cublasHandle
 
     for(int i=0; i<k; i++){
       _jacobi_it_full<0, 8><<<gb.g, gb.b>>>(n, relax_weight, A->val, A->row, A->col, D->val, u->val, f->val, (*u_)->val);
+      cudaDeviceSynchronize();
       swap_temp = u;
       u = *u_;
       *u_ = swap_temp;

@@ -7,6 +7,8 @@
 #include "utility/myMPI.h"
 
 #include "utility/function_cnt.h"
+#include "utility/cudamacro.h"
+#include "utility/utils.h"
 
 customCudaMalloc g_buff_solver, g_buff_scratch, g_buff_nsparse;
 
@@ -25,9 +27,9 @@ namespace CustomCudaMalloc{
         }
         //printf("Custom Cuda Malloc: n_itypes %u(%d), n_vtypes: %u(%d)\n", n_itypes, n_itypes, n_vtypes, n_vtypes);
         cudaMalloc_CNT
-        cudaMalloc( (void **)&(g_buff->itype_ptr), sizeof(itype) * n_itypes);
+        CHECK_DEVICE( cudaMalloc( (void **)&(g_buff->itype_ptr), sizeof(itype) * n_itypes) );
         cudaMalloc_CNT
-        cudaMalloc( (void **)&(g_buff->vtype_ptr), sizeof(vtype) * n_vtypes);
+        CHECK_DEVICE( cudaMalloc( (void **)&(g_buff->vtype_ptr), sizeof(vtype) * n_vtypes) );
         
         g_buff->itype_allocated = n_itypes;
         g_buff->vtype_allocated = n_vtypes;
@@ -97,8 +99,8 @@ namespace CustomCudaMalloc{
                      g_buff->itype_allocated, g_buff->itype_occupied, g_buff->vtype_allocated, g_buff->vtype_occupied);
         }
             
-        cudaFree(g_buff->itype_ptr);
-        cudaFree(g_buff->vtype_ptr);
+        MY_CUDA_CHECK( cudaFree(g_buff->itype_ptr) );
+        MY_CUDA_CHECK( cudaFree(g_buff->vtype_ptr) );
         
         g_buff->itype_ptr = NULL;
         g_buff->vtype_ptr = NULL;
