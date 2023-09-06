@@ -15,6 +15,8 @@
 
 #include "utility/function_cnt.h"
 
+extern int *itaskmap, *taskmap;
+
 __global__
 void _getNNZ(itype n, const itype * __restrict__ to_get_form_prow, const itype *__restrict__ row, itype *nnz_to_get_form_prow){
   itype i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -161,6 +163,9 @@ int bswhichprocess(gsstype *P_n_per_process, int nprocs, gsstype e){
   }
   return low;
 }
+	
+int dumpP=1;
+extern char idstring[];
 
 CSR* nsparseMGPU(CSR *Alocal, CSR *Pfull, csrlocinfo *Plocal, bool used_by_solver) {
   _MPI_ENV;
@@ -195,6 +200,14 @@ CSR* nsparseMGPU(CSR *Alocal, CSR *Pfull, csrlocinfo *Plocal, bool used_by_solve
 	       
   mat_c.M=mat_a.M;
   mat_c.N=mat_p.N;
+  if(dumpP) {
+	  char MName[256];
+	  sprintf(MName,"Alocal_%s",idstring);
+	  CSRm::printMM(Alocal,MName);
+	  sprintf(MName,"Pfull_%s",idstring);
+	  CSRm::printMM(Pfull,MName);
+	  dumpP=0;
+  }
 
   
   CSR* C = CSRm::init(mat_c.M, Pfull->m, mat_c.nnz, false, true, false, Alocal->full_n, Alocal->row_shift);
@@ -335,6 +348,17 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
     CHECK_MPI( MPI_Allgather( &Alocal->n, sizeof(itype), MPI_BYTE, P_n_per_process, sizeof(itype), MPI_BYTE, MPI_COMM_WORLD ) );
   }// P_n_per_process[i]: number of rows that process i owns of matrix P 
 //  fprintf(stderr,"Task %d reached line %d in compute_rows_to_receive (%s)\n",myid,__LINE__,__FILE__);
+  CHECK_MPI(
+    MPI_Allgather(
+      &Alocal->row_shift,
+      sizeof(gstype),
+      MPI_BYTE,
+      row_shift,
+      sizeof(gstype),
+      MPI_BYTE,
+      MPI_COMM_WORLD
+    )
+  );
 
   itype *whichprow=NULL, *rcvpcolxrow=NULL, *rcvprow=NULL;
 
@@ -368,12 +392,10 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
   itype *aofwhichproc=(itype *)Malloc(sizeof(itype)*cntothercol); 
 
   gsstype cum_p_n_per_process[nprocs];
-  row_shift[0]=0;
   ends[0] = P_n_per_process[0];  
   cum_p_n_per_process[0]=P_n_per_process[0]-1;
   for(int i=1; i<nprocs; i++){
      cum_p_n_per_process[i]=cum_p_n_per_process[i-1] + (gstype) P_n_per_process[i];
-     row_shift[i]=row_shift[i-1]+ (gstype) P_n_per_process[i-1];
      ends[i] = ends[i-1]+ ((gstype)  P_n_per_process[i]);
   }
   assert(ends[nprocs-1] == Alocal->full_n);
@@ -381,9 +403,19 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
   itype countall=0;
   
   for(j=0; j<cntothercol; j++) {
+    int pwp;
     whichproc = bswhichprocess(cum_p_n_per_process, nprocs, othercol[sothercol][j]+Alocal->row_shift);
     if(whichproc > (nprocs-1)){
       whichproc=nprocs-1;
+    }
+    pwp=whichproc;
+    whichproc=taskmap[whichproc]; 
+    if(whichproc==myid) {
+	    fprintf(stderr,"Task %d, unexpected whichproc for col %ld (was %d), line=%d\n",myid,othercol[sothercol][j]+Alocal->row_shift,pwp,__LINE__);
+            for(itype i=0; i<nprocs; i++) {
+	      fprintf(stderr,"cnt=%d,row_shift[%d]=%ld,end[%d]=%ld, cum_p_n_per_process[%d]=%ld,\n",cnt,i,row_shift[i],i,ends[i],i,cum_p_n_per_process[i]);
+	      exit(1);
+	    }
     }
     countp[whichproc]++;
     aofwhichproc[countall]=whichproc;
@@ -408,7 +440,7 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
   for(j=0; j<cntothercol; j++) {
       whichproc=aofwhichproc[j];
       whichprow[offset[whichproc]+countp[whichproc]]=othercol[sothercol][j]+
-		                                     (Alocal->row_shift-(whichproc?ends[whichproc-1]:0));
+		                                     (Alocal->row_shift-row_shift[whichproc]);
       countp[whichproc]++;
   }
   free(aofwhichproc);
@@ -704,7 +736,6 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
         q++;
       }
     }
-    cnt++;
     if(nnz_per_row_shift->n>0) {
         gb = gb1d(dev_nnz_per_row_shift->n, NUM_THR);
         // -------- TEST ---------
@@ -754,9 +785,16 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
     }
     for(i=0; i<rows2bereceived; i++){r = whichprow[i];
       // count nnz per process for comunication
+      int pwp;
       whichproc = bswhichprocess(cum_p_n_per_process, nprocs, r);
       if(whichproc>(nprocs-1)){
         whichproc=nprocs-1;
+      }
+      pwp=whichproc;
+      whichproc=taskmap[whichproc];
+      if(whichproc==myid) {
+         fprintf(stderr,"Task %d, unexpected whichproc for col %ld (was %d), line=%d\n",myid,r+Alocal->row_shift,pwp,__LINE__);
+         exit(1);
       }
       rcounts[whichproc] += rcvpcolxrow[i];
   	  // after local add shift
@@ -787,12 +825,37 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
   int totcell=0;
   static int s_totcell_new;
   memcpy(rcounts_src, rcounts, nprocs*sizeof(itype));
-  for(i=0; i<nprocs; i++) {
+  itype  whichdisplr[nprocs],  ndisplr=0;
+  {
+    for(int i=0; i<nprocs; i++) {
+	    if(rcounts[i]>0 || i==myid) {
+               whichdisplr[ndisplr]=i; ndisplr++; 
+            }
+    }
+    itype tempind;
+    for (int i = 0; i < ndisplr-1; i++) {
+    // Last i elements are already in place
+      for (int j = 0; j < ndisplr-i-1; j++) {
+        if (itaskmap[whichdisplr[j]] > itaskmap[whichdisplr[j+1]]) {
+		tempind=whichdisplr[j];
+		whichdisplr[j]=whichdisplr[j+1];
+		whichdisplr[j+1]=tempind;
+        }
+      }
+    }
+  }
+  int previous_index=0;
+  int flagaddmycolp=1;
+  for(j=0; j<ndisplr; j++){
+      i=whichdisplr[j];
       totcell += rcounts[i];
-      displr_target[i]=(i==0)?0:(displr_target[i-1]+(i==(myid+1)?mycolp:rcounts_src[i-1]));
+      displr_target[i]=(j==0)?0:(displr_target[previous_index]+(((itaskmap[i]>itaskmap[myid])&&flagaddmycolp)?mycolp:rcounts_src[previous_index]));
+      if(itaskmap[i]>itaskmap[myid]) { flagaddmycolp=0; }
       rcounts[i]*=sizeof(itype);
-      displr[i]=(i==0)?0:(displr[i-1]+rcounts[i-1]);
+      displr[i]=(j==0)?0:(displr[previous_index]+rcounts[previous_index]);
       displr_src[i]=displr[i]/sizeof(itype);
+//      printf("Task %d [%d]: %d, previous_index=%d displr_src[%d]=%d,rcounts_src[%d]=%d,displr_target[%d]=%d,mycolp=%d\n",myid,j,i,previous_index,i,displr_src[i],i,rcounts_src[i],i,displr_target[i],mycolp); 
+      previous_index=i;
   }
   if (iPtemp1 == NULL && totcell > 0){ // first allocation
     cudaMalloc_CNT
@@ -877,12 +940,21 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
   
 //   gpuErrchk( cudaPeekAtLastError() );
 //   gpuErrchk( cudaDeviceSynchronize() );
-  
+#if 0  
   for(i=0; i<nprocs; i++){
     if(rcounts_src[i]>0) {
         CHECK_DEVICE( cudaMemcpyAsync(completedP->col+displr_target[i], Pcol+displr_src[i], rcounts_src[i] * sizeof(itype), cudaMemcpyHostToDevice, h->stream1)  );
     }
   }
+#endif
+  for(j=0; j<ndisplr; j++){
+    i=whichdisplr[j];
+    if(rcounts_src[i]>0) {
+//	printf("Task %d: %d, displr_src[%d]=%d,rcounts_src[%d]=%d,displr_target[%d]=%d,completedP_nnz=%d,mycolp=%d\n",myid,i,i,displr_src[i],i,rcounts_src[i],i,displr_target[i],completedP_nnz,mycolp); 
+        CHECK_DEVICE( cudaMemcpyAsync(completedP->col+displr_target[i], Pcol+displr_src[i], rcounts_src[i] * sizeof(itype), cudaMemcpyHostToDevice, h->stream1)  );
+    } 
+  }
+
 
   col2send = NULL;
   for(i=0; i<nprocs; i++) {
@@ -901,12 +973,13 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
   }
   val2send = NULL;
 
-  for(i=0; i<nprocs; i++){
+  for(j=0; j<ndisplr; j++){
+    i=whichdisplr[j];
     if(rcounts_src[i]>0) {
         CHECK_DEVICE(  cudaMemcpy(completedP->val+displr_target[i], Pval+displr_src[i], rcounts_src[i] * sizeof(vtype), cudaMemcpyHostToDevice)  );
     }
   }
-  
+
 #if !defined(CSRSEG)
   CHECK_DEVICE( cudaMemcpy(completedP->val + nzz_pre_local, Plocal->val, Plocal->nnz * sizeof(vtype), cudaMemcpyDeviceToDevice);  );
   CHECK_DEVICE( cudaMemcpy(completedP->col + nzz_pre_local, Plocal->col, Plocal->nnz * sizeof(itype), cudaMemcpyDeviceToDevice);  );
@@ -933,6 +1006,7 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
   if (Alocal_->m != completedP->n)
       fprintf(stderr, "[%d] Alocal_->m = %d != %d = completedP->n (totcell = %d, Plocal->n = %d, countall = %d, rows2berecived = %d)\n", myid, Alocal_->m, completedP->n, totcell, Plocal->n, countall, Alocal->rows_to_get->rows2bereceived );
   assert( Alocal_->m == completedP->n );
+  
   CSR *C = nsparseMGPU(Alocal_, completedP, &Plocalinfo, used_by_solver);
 
   Pcol = NULL;
@@ -949,7 +1023,9 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
   Alocal_->row = NULL;
   Alocal_->val = NULL;
   std::free(Alocal_);
-  
+
+  cnt++;
+
   POP_RANGE
   return C;
 }

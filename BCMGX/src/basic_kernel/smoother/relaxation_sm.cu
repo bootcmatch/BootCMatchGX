@@ -328,6 +328,8 @@ int srmfb=-1;
 #define MAXNTASKS 4096
 #define JACOBI_TAG 1234
 
+extern int cntrelax;
+
 template <int MINI_WARP_SIZE>
 vector<vtype>* internal_jacobi_overlapped(int level, int k, CSR *A, vector<vtype> *u, vector<vtype> **u_, vector<vtype> *f, vector<vtype> *D, vtype relax_weight){
   _MPI_ENV;
@@ -338,6 +340,7 @@ vector<vtype>* internal_jacobi_overlapped(int level, int k, CSR *A, vector<vtype
   halo_info hi = A->halo;//H_halo_info[level];
   static MPI_Request requests[MAXNTASKS];
   static int ntr=0;
+
   
   if(A->shrinked_flag==false) {
 #if 0
@@ -371,7 +374,9 @@ vector<vtype>* internal_jacobi_overlapped(int level, int k, CSR *A, vector<vtype
     fprintf(stderr,"A must be shrinked before relaxation!\n");
     exit(1);
   } 
+
   int post_local = A->post_local;
+  if(cntrelax) printf("Task %d, level %d, post_local=%d\n",myid,level,post_local);
   vector<vtype> *x_ = NULL;
 #if 0
   printf("Task %d, level %d, matrix=%x,to_send_n=%d, to_recv_n=%d, needy_n=%d, u_n=%d, A_n=%d, A_m=%d, A_shrinked_m=%d,  A_full_n=%lu, post_local=%d loc_n=%d\n",myid,level,A,hi.to_send_n,hi.to_receive_n,os.needy_n,u->n,A->n,A->m, A->shrinked_m,A->full_n,post_local,os.loc_n);      
@@ -450,6 +455,7 @@ vector<vtype>* internal_jacobi_overlapped(int level, int k, CSR *A, vector<vtype
       if (u->n == A->full_n) {        // PICO
         gb = gb1d(hi.to_receive_n, BLOCKSIZE);
         setReceivedWithMask<<<gb.g, gb.b, 0, *osl->comm_stream>>>(hi.to_receive_n , u->val, hi.what_to_receive_d, hi.to_receive_d->val, A->row_shift);
+	printf("Should never reach line %d in relaxation_sm\n",__LINE__);
 #if 0
         printf("A->full_n=%d, A->n=%d, A->m=%d, A->shrinked_m=%d\n",A->full_n,A->n,A->m,A->shrinked_m);
 #endif
@@ -508,6 +514,7 @@ vector<vtype>* internal_jacobi_overlapped(int level, int k, CSR *A, vector<vtype
     }
 
     cudaDeviceSynchronize();
+    if(k==1) break;
     swap_temp = u;
     u = *u_;
 #if 0

@@ -271,6 +271,7 @@ void jacobi_adaptive_miniwarp_coarsest(cusparseHandle_t cusparse_h, cublasHandle
 
     for(int i=0; i<k; i++){
       _jacobi_it_full<0, 2><<<gb.g, gb.b>>>(n, relax_weight, A->val, A->row, A->col, D->val, u->val, f->val, (*u_)->val);
+      if(k==1) break;
       swap_temp = u;
       u = *u_;
       *u_ = swap_temp;
@@ -281,6 +282,7 @@ void jacobi_adaptive_miniwarp_coarsest(cusparseHandle_t cusparse_h, cublasHandle
 
     for(int i=0; i<k; i++){
       _jacobi_it_full<0, 4><<<gb.g, gb.b>>>(n, relax_weight, A->val, A->row, A->col, D->val, u->val, f->val, (*u_)->val);
+      if(k==1) break;
       swap_temp = u;
       u = *u_;
       *u_ = swap_temp;
@@ -291,6 +293,7 @@ void jacobi_adaptive_miniwarp_coarsest(cusparseHandle_t cusparse_h, cublasHandle
 
     for(int i=0; i<k; i++){
       _jacobi_it_full<0, 8><<<gb.g, gb.b>>>(n, relax_weight, A->val, A->row, A->col, D->val, u->val, f->val, (*u_)->val);
+      if(k==1) break;
       cudaDeviceSynchronize();
       swap_temp = u;
       u = *u_;
@@ -302,6 +305,7 @@ void jacobi_adaptive_miniwarp_coarsest(cusparseHandle_t cusparse_h, cublasHandle
 
     for(int i=0; i<k; i++){
       _jacobi_it_full<0, 16><<<gb.g, gb.b>>>(n, relax_weight, A->val, A->row, A->col, D->val, u->val, f->val, (*u_)->val);
+      if(k==1) break;
       swap_temp = u;
       u = *u_;
       *u_ = swap_temp;
@@ -312,6 +316,7 @@ void jacobi_adaptive_miniwarp_coarsest(cusparseHandle_t cusparse_h, cublasHandle
 
     for(int i=0; i<k; i++){
       _jacobi_it_full<0, 32><<<gb.g, gb.b>>>(n, relax_weight, A->val, A->row, A->col, D->val, u->val, f->val, (*u_)->val);
+      if(k==1) break;
       swap_temp = u;
       u = *u_;
       *u_ = swap_temp;

@@ -104,6 +104,7 @@ namespace CSRm{
   void partialFree(CSR *A, bool val, bool col, bool row);
   void printInfo(CSR *A, FILE* fp = stdout);
   void print(CSR *A, int type, int limit=0, FILE* fp = stdout);
+  void printMM(CSR *A, char *name);
   bool equals(CSR *A, CSR *B);
   bool halo_equals(halo_info *a, halo_info* b);
   bool chk_uniprol(CSR *A);

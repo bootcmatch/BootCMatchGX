@@ -6,6 +6,8 @@
 #include "basic_kernel/matrix/CSR.h"
 #include "utility/function_cnt.h" //PICO
 
+extern int *taskmap, *itaskmap;
+
 template <typename T>
 __inline__
 void chop_array_MPI_same(int nprocs, unsigned n, unsigned *chunks, unsigned *chunkn){
@@ -23,13 +25,14 @@ template <typename T>
 __inline__
 void chop_array_MPI(int nprocs, int n, int n_local, int *chunks, int *chunkn){
   itype ns[nprocs];
+  itype tmpns[nprocs],tmpchunks[nprocs];
 
   CHECK_MPI(
     MPI_Allgather(
       &n_local,
       sizeof(itype),
       MPI_BYTE,
-      ns,
+      tmpns,
       sizeof(itype),
       MPI_BYTE,
       MPI_COMM_WORLD
@@ -38,12 +41,20 @@ void chop_array_MPI(int nprocs, int n, int n_local, int *chunks, int *chunkn){
 
 
   int i;
+  for(i=0; i<nprocs-1; i++){
+	  ns[i]=tmpns[i];
+	  chunkn[i] = ns[i] * sizeof(T);
+  }
+
   itype tot = 0;
   for(i=0; i<nprocs-1; i++){
-    chunkn[i] = ns[i] * sizeof(T);
-    chunks[i] = tot;
-    tot += chunkn[i];
+    tmpchunks[i] = tot;
+    tot += (tmpns[itaskmap[i]] * sizeof(T));
   }
+  for(i=0; i<nprocs-1; i++){
+	  chunks[i]=tmpchunks[taskmap[i]];
+  }
+
   chunkn[nprocs-1] = (n * sizeof(T))  - tot;
   chunks[i] = tot;
 }
@@ -679,11 +690,16 @@ CSR* join_MatrixMPI_all(CSR *Alocal){
       MPI_COMM_WORLD
     )
   );
+  if(myid==0) {
+         for(int i=0; i<nprocs; i++){
+		 printf("n[%d]=%d, nnzs[%d]=%d\n",i,row_ns[i],i,nnzs[i]);
+ 	 }
+  }
 
   itype full_n = 0;
   itype full_nnz = 0;
   CSR *A;
-  int chunkn[nprocs], chunks[nprocs];
+  int chunkn[nprocs], chunks[nprocs], tmpchunkn[nprocs], tmpchunks[nprocs];
 
   for(int i=0; i<nprocs; i++){
     full_n += row_ns[i];
@@ -696,10 +712,19 @@ CSR* join_MatrixMPI_all(CSR *Alocal){
 
   // gather rows
   for(int i=0; i<nprocs; i++){
-    chunkn[i] = row_ns[i] * sizeof(itype);
-    chunks[i] = ((i==0)?0:(chunks[i-1]+chunkn[i-1]));
+    chunkn[i]=tmpchunkn[i] = row_ns[i] * sizeof(itype);
   }
   chunkn[nprocs-1] += sizeof(itype);
+
+  itype tot=0;
+  for(int i=0; i<nprocs; i++){
+      tmpchunks[i]=tot;
+      tot+=tmpchunkn[itaskmap[i]];    
+  }
+
+  for(int i=0; i<nprocs; i++){
+      chunks[i]=tmpchunks[taskmap[i]];
+  }
 
   itype rn = Alocal->n * sizeof(itype);
   if(myid == nprocs-1)
@@ -724,9 +749,9 @@ CSR* join_MatrixMPI_all(CSR *Alocal){
   for(int i=0; i<Alocal->full_n; i++){
       // next piece
       if(i >= th && (j<(nprocs)) ){
-        rowoffset += nnzs[j];
+        rowoffset += nnzs[taskmap[j]];
         j++;
-        th += row_ns[j];
+        th += row_ns[taskmap[j]];
       }
       A->row[i] += rowoffset;
     }
@@ -738,8 +763,17 @@ CSR* join_MatrixMPI_all(CSR *Alocal){
 
   // gather columns
   for(int i=0; i<nprocs; i++){
-    chunkn[i] = nnzs[i] * sizeof(itype);
-    chunks[i] = ((i==0)?0:(chunks[i-1]+chunkn[i-1]));
+    chunkn[i]=tmpchunkn[i] = nnzs[i] * sizeof(itype);
+  }
+
+  tot=0;
+  for(int i=0; i<nprocs; i++){
+      tmpchunks[i]=tot;
+      tot+=tmpchunkn[itaskmap[i]];    
+  }
+
+  for(int i=0; i<nprocs; i++){
+        chunks[i]=tmpchunks[taskmap[i]];
   }
   CHECK_MPI(
     MPI_Allgatherv(
@@ -756,9 +790,10 @@ CSR* join_MatrixMPI_all(CSR *Alocal){
 
   // gather value
   for(int i=0; i<nprocs; i++){
-    chunkn[i] = nnzs[i] * sizeof(vtype);
-    chunks[i] = ((i==0)?0:(chunks[i-1]+chunkn[i-1]));
+    chunkn[i] = chunkn[i] * (sizeof(vtype)/sizeof(itype));
+    chunks[i] = chunks[i] * (sizeof(vtype)/sizeof(itype)); 
   }
+
   CHECK_MPI(
     MPI_Allgatherv(
       Alocal->val,

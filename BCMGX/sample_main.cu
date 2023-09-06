@@ -20,6 +20,9 @@
 #include "utility/distribuite.h"
 #include "nsparse.h"
 
+int *taskmap=NULL;
+int *itaskmap=NULL;
+char idstring[128];
 
 #include "basic_kernel/halo_communication/extern2.h"   //PICO
 #include "utility/function_cnt.h"        //PICO
@@ -112,6 +115,20 @@ CSR* generateLocalLaplacian3D(itype n){
         Alocal->val[NNZ] = values[j];
         NNZ++;
       }
+   }
+   taskmap=(int *)malloc(nprocs*sizeof(*taskmap));
+   itaskmap=(int *)malloc(nprocs*sizeof(*itaskmap));
+   if(taskmap==NULL) {
+     fprintf(stderr,"Could not get %d byte for taskmap\n",nprocs*sizeof(*taskmap));
+     exit(1);
+   }
+   if(itaskmap==NULL) {
+     fprintf(stderr,"Could not get %d byte for itaskmap\n",nprocs*sizeof(*itaskmap));
+     exit(1);
+   }
+   for(int i=0; i<nprocs; i++) {
+      taskmap[i]=i;
+      itaskmap[i]=i;
    }
    Alocal->nnz = NNZ;
    return Alocal;
@@ -233,11 +250,32 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
 
   MPI_Comm_rank(NEWCOMM, &my3id);
   MPI_Cart_coords(NEWCOMM, my3id, 3, coords);
-
   int p = coords[0];
   int q = coords[1];
   int r = coords[2]; 
   gstype ilower=(((gstype)r)*((gstype)Q)*((gstype)P) +((gstype)q)*((gstype)P) + ((gstype)p))*((gstype)local_size);
+  int allcoords[3*P*Q*R];
+  taskmap=(int *)malloc(nprocs*sizeof(*taskmap));
+  itaskmap=(int *)malloc(nprocs*sizeof(*itaskmap));
+  if(taskmap==NULL) {
+     fprintf(stderr,"Could not get %d byte for taskmap\n",nprocs*sizeof(*taskmap));
+     exit(1);
+  }
+  if(itaskmap==NULL) {
+     fprintf(stderr,"Could not get %d byte for itaskmap\n",nprocs*sizeof(*itaskmap));
+     exit(1);
+  }
+  CHECK_MPI( MPI_Allgather( coords, sizeof(coords), MPI_BYTE, allcoords, sizeof(coords), MPI_BYTE, MPI_COMM_WORLD ) );
+  for(int i=0; i<nprocs; i++) {
+      taskmap[(allcoords[i*3+2]*Q*P)+(allcoords[i*3+1]*P)+(allcoords[i*3])]=i;
+      itaskmap[i]=(allcoords[i*3+2]*Q*P)+(allcoords[i*3+1]*P)+(allcoords[i*3]);
+  }
+  if(myid==0) {
+  	for(int i=0; i<nprocs; i++) {
+		printf("taskmap[%d]=%d, itaskmap[%d]=%d\n",i,taskmap[i],i,itaskmap[i]);
+	}
+  }
+  
   CSR *Alocal = CSRm::init(local_size, N, (local_size*7), true, false, false, N, ilower);
 // alloc COO 
   itype * Arow = (itype*) malloc( sizeof(itype *) * (local_size*7) );
@@ -348,7 +386,7 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
    }
    Alocal->nnz = nz_count;
 
-#ifdef PRINT_COO3D
+#if defined(PRINT_COO3D)
   FILE *fout = NULL;
   char fname[256];
   snprintf(fname, 256, "matrix-rank%d-pqr-%d-%d-%d.mtx", myid, p, q, r);
@@ -358,7 +396,7 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
     exit(EXIT_FAILURE);
   }
   for (int i =0; i < nz_count; i++){
-    fprintf(fout,"%d %d %lf\n",Arow[i]+(ilower*1), Acol[i], Aval[i] );     
+    fprintf(fout,"%d %d %lf\n",Arow[i]+(ilower+1), Acol[i]+ilower+1, Aval[i] );     
   }
    fclose(fout);  
 #endif   
@@ -442,6 +480,7 @@ void check_and_fix_order(CSR * A) {
 #define USAGE "\nUsage: sample_main [--matrix <FILE_NAME> | --laplacian <SIZE>] [--preconditioner <BOOL>] --settings <FILE_NAME>\n\n"\
                "\tYou can specify only one out of the three available options: --matrix, --laplacian-3d and --laplacian\n\n"\
 	           "\t-m, --matrix <FILE_NAME>         Read the matrix from file <FILE_NAME>.\n"\
+	           "\t-l, --laplacian-3d <FILE_NAME>   Read generation parameters from file <FILE_NAME>.\n"\
 		       "\t-a, --laplacian <SIZE>           Generate a matrix whose size is <SIZE>^3.\n"\
 	           "\t-s, --settings <FILE_NAME>       Read settings from file <FILE_NAME>.\n"\
                "\t-p, --preconditioner <BOOL>      If 0 the preconditioner will not be applied, otherwise it will be applied. If the parameter \n"\
@@ -489,8 +528,8 @@ int main(int argc, char **argv){
 	    break;		    
       case 'a':
         n = atoi(optarg);
-	    opt = LAP;
-   	    break;		    
+        opt = LAP;
+	    break;		    
       case 's':
         settings_file = strdup(optarg);
 	    break;
@@ -533,11 +572,26 @@ int main(int argc, char **argv){
       Alocal_master = readMatrixFromFile(mtx_file,0,false);
       check_and_fix_order(Alocal_master);
     }
+    taskmap=(int *)malloc(nprocs*sizeof(*taskmap));
+    itaskmap=(int *)malloc(nprocs*sizeof(*itaskmap));
+    if(taskmap==NULL) {
+      fprintf(stderr,"Could not get %d byte for taskmap\n",nprocs*sizeof(*taskmap));
+      exit(1);
+    }
+    if(itaskmap==NULL) {
+      fprintf(stderr,"Could not get %d byte for itaskmap\n",nprocs*sizeof(*itaskmap));
+      exit(1);
+    }
+    for(int i=0; i<nprocs; i++) {
+      taskmap[i]=i;
+      itaskmap[i]=i;
+    } 
     Alocal = split_MatrixMPI(Alocal_master);
     if (ISMASTER){
        CSRm::free(Alocal_master);
     }
-  }else if ( opt == LAP_3D || opt == LAP){
+    snprintf(idstring,sizeof(idstring),"1_1_1");
+ }else if ( opt == LAP_3D || opt == LAP){
     CSR *Alocal_host = NULL;
     if( opt == LAP_3D){ // Each process generates its portion of the matrix.
       enum lap_params {nx=0, ny=1, nz=2, P=3, Q=4, R=5};
@@ -548,6 +602,7 @@ int main(int argc, char **argv){
         exit(EXIT_FAILURE);
       }
       Alocal_host = generateLocalLaplacian3D_mesh(parms[nx], parms[ny], parms[nz], parms[P], parms[Q], parms[R]);
+      snprintf(idstring,sizeof(idstring),"%dx%dx%d",parms[P],parms[Q],parms[R]);
       free(parms);
     }else if( opt == LAP){
       Alocal_host = generateLocalLaplacian3D(n);
@@ -561,8 +616,12 @@ int main(int argc, char **argv){
     CSRm::free(Alocal_host);
   }
   Alocal->col_shifted=-Alocal->row_shift;
+  char localname[256];
+  snprintf(localname,sizeof(localname),"A_%s",idstring);
+  CSRm::printMM(Alocal,localname);
+//  if(myid) printf("Task %d, shifting A (%x) of %ld (%d in %s). A shift=-%lu, A col_shifted=%ld\n",myid,Alocal,-Alocal->row_shift,__LINE__,__FILE__,Alocal->row_shift,Alocal->col_shifted);
   Vectorinit_CNT
-  rhs = Vector::init<vtype>(Alocal->n, true, true); 
+  rhs = Vector::init<vtype>(Alocal->n, true, true);  // BUG? Alocal->n  ===>  Alocal->m/nprocs
   Vector::fillWithValue(rhs, 1.);
 
   if(ISMASTER){

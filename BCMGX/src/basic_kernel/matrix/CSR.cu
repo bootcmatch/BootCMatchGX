@@ -110,6 +110,35 @@ CSR* CSRm::init(stype n, gstype m, stype nnz, bool allocate_mem, bool on_the_dev
   return A;
 }
 
+void CSRm::printMM(CSR *A, char *name) {
+  _MPI_ENV;
+  CSR *A_ = NULL;
+  return;
+  if(A->on_the_device)
+    A_ = CSRm::copyToHost(A);
+  else
+    A_ = A;
+#define MAXMATRIXFILENAME 256
+  char localname[MAXMATRIXFILENAME];
+  snprintf(localname,sizeof(localname),"%s_%d",name,myid);
+  FILE *fp=fopen(localname,"w");
+  if(fp==NULL) {
+	 fprintf(stderr,"Could not open %s",localname);
+	 exit(1);
+  }
+  fprintf(fp,"%%%MatrixMarket matrix coordinate real general\n");
+  fprintf(fp,"%d %d %d %ld %ld\n",A_->full_n, A_->m, A_->nnz,A_->row_shift,A_->full_n);
+  for(int i=0; i<A_->n; i++) {
+	  for(int j=A_->row[i]; j<A_->row[i+1]; j++) {
+		  fprintf(fp,"%d %d %lf\n",i+1+A_->row_shift,A_->col[j]+1+A_->row_shift,A_->val[j]);
+	  }
+  }
+  fclose(fp);
+  
+  if(A->on_the_device)
+    CSRm::free(A_);
+}
+
 void CSRm::print(CSR *A, int type, int limit, FILE* fp){
   CSR *A_ = NULL;
   
@@ -973,7 +1002,7 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp_new(cusparseHandle_t cu
   PUSH_RANGE(__func__,4)
     
   _MPI_ENV;
-  
+
   if(nprocs == 1) {
     vector<vtype> *w_ = NULL;
     if (w == NULL) {
@@ -997,7 +1026,6 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp_new(cusparseHandle_t cu
   // ----------------------------------------- temp check -----------------------------------------
   assert( A->halo.to_receive_n + local_x->n == A_->m );
   // ----------------------------------------------------------------------------------------------
-  
   int post_local = A->post_local;
 
   vector<vtype> *x_ = NULL;

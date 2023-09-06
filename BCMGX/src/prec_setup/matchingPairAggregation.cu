@@ -6,6 +6,9 @@
 
 #include "utility/function_cnt.h"
 
+extern int *taskmap;
+extern int *itaskmap;
+
 // Functor type for selecting values less than some criteria
 struct Matched{
     int compare;
@@ -177,7 +180,7 @@ void matchingPairAggregation(handles *h, CSR *A, vector<vtype> *w, CSR **_P, CSR
  if(0) fprintf(stderr,"Task %d reached line %d in matchingPairAggregation (%s)\n",myid,__LINE__,__FILE__);
   vector<itype> *M = suitor(h, A, w);
  if(0) fprintf(stderr,"Task %d reached line %d in matchingPairAggregation (%s)\n",myid,__LINE__,__FILE__);
-
+ //static int cnt;
 
   CSR *R, *P;
 
@@ -196,7 +199,7 @@ void matchingPairAggregation(handles *h, CSR *A, vector<vtype> *w, CSR **_P, CSR
     TOTAL_MAKE_P += TIMER_ELAPSED;
   }
 
-  gstype m_shifts[nprocs];
+  gstype mt_shifts[nprocs], m_shifts[nprocs];
   gstype ms[nprocs];
 
   //get colum numbers other process
@@ -213,12 +216,16 @@ void matchingPairAggregation(handles *h, CSR *A, vector<vtype> *w, CSR **_P, CSR
         MPI_COMM_WORLD
       )
     );
-   if(0)  fprintf(stderr,"Task %d reached line %d in matchingPairAggregation (%s)\n",myid,__LINE__,__FILE__);
+
+    if(0)  fprintf(stderr,"Task %d reached line %d in matchingPairAggregation (%s)\n",myid,__LINE__,__FILE__);
     gstype tot_m = 0;
 
     for(int i=0; i<nprocs; i++){
-      m_shifts[i] = tot_m;
-      tot_m += ms[i];
+      mt_shifts[i]=tot_m;
+      tot_m += ms[itaskmap[i]];
+    }
+    for(int i=0; i<nprocs; i++){
+      m_shifts[i] = mt_shifts[itaskmap[i]];
     }
     //P->m = tot_m;
     //CSRm::shift_cols(P, m_shifts[myid]);
@@ -227,6 +234,7 @@ void matchingPairAggregation(handles *h, CSR *A, vector<vtype> *w, CSR **_P, CSR
     //R->row += m_shifts[myid];
     //R->n = ms[myid];
     //R->m = A->full_n;
+//    printf("%d %d %d P_R_shift Task %d\n",cnt++,P->row_shift,m_shifts[myid],myid);
     CSRm::shift_cols(R, P->row_shift);
     R->row_shift = m_shifts[myid];
 

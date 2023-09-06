@@ -7,6 +7,7 @@
 #define USE_GETMCT
 #define NUM_THR 1024
 extern int scalennzmiss;
+extern int *taskmap;
 __global__
 void _getMissingMask(itype nnz, itype *A_col, itype *missing, itype row_shift, itype n){
   itype i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -41,7 +42,7 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R, gstype *row_shift){
   
   CHECK_MPI(
     MPI_Allgather(
-      &A->n,
+      R==NULL?&A->n:&R->n,
       sizeof(stype),
       MPI_BYTE,
       row_ns,
@@ -51,14 +52,28 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R, gstype *row_shift){
     )
   );
 
+  CHECK_MPI(
+    MPI_Allgather(
+      R==NULL?&A->row_shift:&R->row_shift,
+      sizeof(gstype),
+      MPI_BYTE,
+      row_shift,
+      sizeof(gstype),
+      MPI_BYTE,
+      MPI_COMM_WORLD
+    )
+  );
+
   ends[0] = row_ns[0];
-  row_shift[0]=0;
   for(itype i=1; i<nprocs; i++) {
       ends[i] = row_ns[i] + ends[i-1];
-      row_shift[i]=row_shift[i-1]+ends[i-1];
   }
 
-  assert(ends[nprocs-1] == A->full_n);
+  if(R==NULL) {
+	  assert(ends[nprocs-1] == A->full_n);
+  } else {
+	  assert(ends[nprocs-1] == R->full_n);
+  }
 
 #ifndef USE_GETMCT
   itype nnz = 0;
@@ -157,19 +172,19 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R, gstype *row_shift){
       CHECK_AGAIN:
       if(j >= ends[J]){
 
-        if(J != myid)
-          missing[J]->n = I;
+        if(taskmap[J] != myid)
+          missing[taskmap[J]]->n = I;
 
         J++;
         I = 0;
         goto CHECK_AGAIN;
       }
-      missing[J]->val[I] = j;
+      missing[taskmap[J]]->val[I] = j;
       I++;
     }
 
     if(I){
-      missing[J]->n = I;
+      missing[taskmap[J]]->n = I;
     }
 
     free(missing_flat);
@@ -183,13 +198,13 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R, gstype *row_shift){
   // -----------------------------
 
   gstype mypfirstrow;
-  mypfirstrow = A->row_shift; // (R != NULL) ? R->row_shift : A->row_shift;
+  mypfirstrow = R==NULL?A->row_shift:R->row_shift;
         
   int uvs;
   int *getmct(itype *,itype,itype,itype,int *,int**,int*,int);
   int *ptr;
   if(R != NULL) {
-    ptr = getmct( R->col, R->nnz, 0, A->n-1, &uvs, &(R->bitcol), &(R->bitcolsize), NUM_THR);
+    ptr = getmct( R->col, R->nnz, 0, R->n-1, &uvs, &(R->bitcol), &(R->bitcolsize), NUM_THR);
   } else {
     ptr = getmct( A->col, A->nnz, 0, A->n-1, &uvs, &(A->bitcol), &(A->bitcolsize), NUM_THR);
   }
@@ -202,16 +217,9 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R, gstype *row_shift){
     _bitcol->val=ptr;
   }
   
-//   vector<itype> **missing2 = (vector<itype>**)malloc(sizeof(vector<itype>*)*nprocs);
-//   for(int i=0; i<nprocs; i++){
-//     missing2[i] = (uvs > 0) ? Vector::init<itype>(uvs, true, false) : Vector::init<int>(1, true, false);
-//     if(i != myid)
-//       missing2[i]->n = 0;
-//   }
-
   for(int i=0; i<nprocs; i++){
     if(i != myid)
-      missing[i]->n = 0;
+       missing[i]->n = 0;
   }
 
   if(uvs > 0){
@@ -226,7 +234,7 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R, gstype *row_shift){
     missing_flat = (stype*)  malloc(sizeof(stype) * uvs);
     CHECK_HOST(missing_flat);
     memcpy(missing_flat, _bitcol->val, uvs * sizeof(stype));
-    mypfirstrow = A->row_shift;
+    mypfirstrow = (R==NULL)?A->row_shift:R->row_shift;
     stype J = 0, I = 0;
     for(itype i=0; i<uvs; i++){
       itype j = missing_flat[i];
@@ -236,9 +244,9 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R, gstype *row_shift){
       CHECK_AGAIN:
       if((j+mypfirstrow) >= ends[J]){
 
-        if(J != myid)
-          missing[J]->n = I;
-
+        if(taskmap[J] != myid)
+          missing[taskmap[J]]->n = I;
+	  
         J++;
         I = 0;
         goto CHECK_AGAIN;
@@ -250,14 +258,20 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R, gstype *row_shift){
          J=nprocs-1;
       }
 #endif
-      if(J>=nprocs) { fprintf(stderr,"Task id %d: unexpected missing source :%d\n",myid,J); exit(1); }
+      if(J>=nprocs) { fprintf(stderr,"Task id %d: unexpected missing source :%d\n",myid,J); 
+	      	      fprintf(stderr,"Task=%d,R=%x,missing %d+%d\n",myid,R,j,mypfirstrow);
+		      for(int k=0; k<nprocs; k++) {
+			      fprintf(stderr,"Task=%d, ends[%d]=%d\n",myid,k,ends[k]);
+		      }
+	   	      exit(1); 
+                    }
       //if(J<0 || J>=nprocs) { fprintf(stderr,"Task id %d: unexpected missing source :%d\n",myid,J); exit(1); }
 //      if(I>=(((A->nnz)*scalennzmiss)/nprocs) ) { fprintf(stderr,"Task id: unexpected I:%d, should be not greater than %d\n",myid,I, (((A->nnz)*scalennzmiss)/nprocs) ); exit(1); }
-      missing[J]->val[I] = j+(mypfirstrow-(J?ends[J-1]:0));
+      missing[taskmap[J]]->val[I] = j+(mypfirstrow-row_shift[taskmap[J]]);
       I++;
     }
     if(I){
-      missing[J]->n = I;
+      missing[taskmap[J]]->n = I;
     }
     free(missing_flat);
   }
@@ -427,13 +441,39 @@ halo_info haloSetup(CSR *A, CSR *R=NULL){
 
   hi.init = true;
   if(1 || (A->rows_to_get==NULL || R!=NULL)) {
+    gstype reorderspls[nprocs];
+    itype  whichspls[nprocs], nspls=0;
     hi.to_receive_n = total_n;
     int k=0;
     for(int i=0; i<nprocs; i++) {
     	    for(int j=0; j<sendcounts[i]; j++) {
 	        	    hi.to_receive->val[k]=my_missing_flat->val[k]+row_shift[i];
+		    	    if(j==0) { reorderspls[nspls]=hi.to_receive->val[k]; whichspls[nspls]=i; nspls++; }
+			    if(0 && myid==1) {
+				    printf("Task %d, receiving %d from %d\n",myid,hi.to_receive->val[k],i);
+			    }
 			    k++;
 	    }
+    }
+    gstype tempreorder;
+    itype tempind;
+    for (int i = 0; i < nspls-1; i++) {
+    // Last i elements are already in place
+      for (int j = 0; j < nspls-i-1; j++) {
+        if (reorderspls[j] > reorderspls[j+1]) {
+            tempreorder=reorderspls[j];
+            reorderspls[j]=reorderspls[j+1];
+            reorderspls[j+1]=tempreorder;
+            tempind=whichspls[j];
+	    whichspls[j]=whichspls[j+1];
+	    whichspls[j+1]=tempind;
+	}
+      }
+    }
+    itype shift=0;
+    for(int i=0; i<nspls; i++) {
+	sdispls[whichspls[i]]=shift;
+	shift+=sendcounts[whichspls[i]];
     }
     hi.to_receive_counts = sendcounts;
     hi.to_receive_spls = sdispls;

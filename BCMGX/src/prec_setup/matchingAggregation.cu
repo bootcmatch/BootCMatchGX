@@ -11,7 +11,7 @@ float TOTAL_MAKEAHW_TIME=0;
 float TOTAL_MATCHINGPAIR_TIME=0;
 float TOTAL_OTHER_TIME=0;
 int   DETAILED_TIMING=0;
-
+extern char idstring[];
 #include "matchingAggregation.h"
 
 #include "utility/memoryPools.cu"
@@ -136,7 +136,7 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
     
   _MPI_ENV;
   TIMER_DEF;
-
+  static int cnt=0;
   CSR *Ai_ = A, *Ai = NULL;
 
   CSR *Ri_ = NULL;
@@ -148,7 +148,6 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
   for(int i=0; i<amg_data->sweepnumber; i++){
     CSR *Pi_;
     if (0 && myid==0) fprintf(stderr,"Task %d reached line %d \n",myid,__LINE__);
-//     printf ("[%d] (i+1 < amg_data->sweepnumber ? false : true): %d < %d ? --> %d\n", myid, i+1, amg_data->sweepnumber, (i+1 < amg_data->sweepnumber ? false : true));
 
     if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();
@@ -157,6 +156,10 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
     }
     matchingPairAggregation(h, Ai_, wi_, &Pi_, &Ri_, (i==0)); /* routine with the real work. It calls the suitor procedure */
     if (0 && myid==0) fprintf(stderr,"Task %d reached line %d \n",myid,__LINE__);
+    char MName[256];
+    sprintf(MName,"Pi%d_%s",cnt,idstring);
+    CSRm::printMM(Pi_,MName);
+    sprintf(MName,"Ri%d_%s",cnt,idstring);
     
     if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();
@@ -170,7 +173,9 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
 //       TIME::start();
       TIMER_START;
     }
-    
+    char AiName[256], APName[256];
+    sprintf(APName,"AP%d_%s",cnt,idstring);
+    sprintf(AiName,"Ai%d_%s",cnt++,idstring);
     // --------------- PICO ------------------
     CSR *AP;
     AP  = nsparseMGPU_commu_new(h, Ai_, Pi_, false);
@@ -181,6 +186,13 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
      CSRm::shift_cols(Ai, -(Ai->row_shift) );
      Ai->col_shifted=-(Ai->row_shift);
     }
+    if(myid!=0 && AP->col_shifted==0) { /* This is only for debugging */
+     CSRm::shift_cols(AP, -(AP->row_shift) );
+     AP->col_shifted=-(AP->row_shift);
+    }
+    CSRm::printMM(Ri_,MName);
+    CSRm::printMM(Ai,AiName);
+    CSRm::printMM(AP,APName);
 	       
     if (0 && myid==0) fprintf(stderr,"Task %d reached line %d \n",myid,__LINE__);
     // ---------------------------------------
@@ -311,34 +323,19 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
     }
     //*R = CSRm::T(h->cusparse_h0, *P);
     if(nprocs > 1){
-      itype ms[nprocs];
+      //itype ms[nprocs];
       gstype  m_shifts[nprocs];
       // send columns numbers to each process
-      CHECK_MPI(
-        MPI_Allgather(
-          &Ai->n,
-          sizeof(itype),
-          MPI_BYTE,
-          ms,
-          sizeof(itype),
-          MPI_BYTE,
-          MPI_COMM_WORLD
-        )
-      );
-      gstype tot_m = 0;
-
-      for(int i=0; i<nprocs; i++){
-        m_shifts[i] = tot_m;
-        tot_m += ms[i];
-      }
+      m_shifts[myid]=Ai->row_shift;
       CSRm::shift_cols(*P, -m_shifts[myid]);
       
       gstype swp_m = (*P)->m;
       if (myid == nprocs-1){
-          (*P)->m -= m_shifts[myid];
+          (*P)->m = Ai->n;
       }else{
-          (*P)->m = m_shifts[myid+1]-m_shifts[myid];
+          (*P)->m = Ai->n /* m_shifts[myid+1]-m_shifts[myid] */;
       }
+
       *R = CSRm::T_multiproc(h->cusparse_h0, *P, Ai->n, true);
     
       (*P)->m = swp_m;

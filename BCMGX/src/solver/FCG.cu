@@ -111,6 +111,7 @@ void FCG::setHrrchBufferSize(hierarchy *hrrch, int coarsesolver_type){
 }
 
 void FCG::freePreconditionContext(){
+
     free(FCG::context.max_coarse_size);
     Vector::Collection::free(FCG::context.RHS_buffer);
 
