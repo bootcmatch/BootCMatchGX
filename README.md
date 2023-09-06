@@ -29,12 +29,12 @@ make all
 
 ## Solving 
 
-The solver supports three different running modes, that can be selected as follows:
+The solver supports different running modes, that can be selected as follows:
 
 ```sh
 Usage: sample_main [--matrix <FILE_NAME> | --laplacian <SIZE>] [--preconditioner <BOOL>] --settings <FILE_NAME>
        
-       You can specify only one out of the three available options: --matrix, --laplacian-3d and --laplacian
+       You can specify only one out of the available options: --matrix and --laplacian
 
 	      -m, --matrix <FILE_NAME>         Read the matrix from file <FILE_NAME>.
 	      -a, --laplacian <SIZE>           Generate a matrix whose size is <SIZE>^3.
@@ -43,16 +43,14 @@ Usage: sample_main [--matrix <FILE_NAME> | --laplacian <SIZE>] [--preconditioner
 	                                       is not passed on the command line the preconditioner will be applied.
 ```
 
-The directory *src/cfg_files* contains three examples of configuration files that can be used with the *--laplacian-3d* mode. Each file is named as *lap3d_{N}.cfg* where the N denotes the number of processes that you want to run. The directory *test_matrix* contains a matrix in the *Matrix Market* format that can be used with the *--matrix* mode. Finally the file *AMGsettings* contains an example of a configuration file that can be used for the *--settings* option. 
+The directory *test_matrix* contains a matrix in the *Matrix Market* format that can be used with the *--matrix* mode. Finally the file *AMGsettings* contains an example of a configuration file that can be used for the *--settings* option. 
 
-The following are three examples of how you can run the solver in the three different running modes using 2 MPI processes:
+The following are two examples of how you can run the solver in the three different running modes using 2 MPI processes:
 
 ```sh
 mpirun -np 2 bin/sample_main -m ../test_matrix/poisson_100x100.mtx -s ../AMGsettings
 
 mpirun -np 2 bin/sample_main -a 126 -s ../AMGsettings
-
-mpirun -np 2 bin/sample_main -l cfg_files/lap3d_2.cfg -s ../AMGsettings
 
 ```
 
@@ -62,21 +60,36 @@ The configuration file defines the preconditioning and solving procedure.
 
 The configuration parameters are:
 
-* bootstrap_type: type of final AMG composition; 0 multiplicative, 1 symmetrized multi., 2 additive; NB: Here put 0 for single AMG component
-* max_hrc: max number of hierarchies in the final bootstrap AMG; NB: Here put 1 for single AMG component
-* rho: desired convergence rate of the composite AMG; NB: This is not generally obtained if criterion on max_hrc is reached
-* matchtype: 3 Suitor
-* aggrsweeps: pairwise aggregation steps; 0 pairs; 1 double pairs, etc ...
-* aggr_type; 0 unsmoothed, 1 smoothed (not yet supported)
-* max_levels: max number of levels built for the single hierarchy
-* cycle_type: 0-Vcycle, 1-Hcycle, 2-Wcycle
-* coarse_solver: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 l1-Jacobi
-* relax_type: 0 Jacobi, 1 FGS/BGS, 3 symmetrized GS, 4 l1-Jacobi
-* relaxnumber_coarse: number of iterations for the coarsest solver
-* prerelax_sweeps: number of pre-smoother iterations at the intermediate levels
-* postrelax_sweeps: number of post-smoother iterations at the intermediate levels
-* itnlim: maximum number of iterations for the solver
-* rtol: relative accuracy on the solution
-* mem_alloc_size: memory size of the data structures used to exchange data between processes
+0                  % bootstrap_type: 0 multiplicative, 1 symmetrized multi., 2 additive; NB: This is the composition rule when bootstrap is applied and more than 1 AMG hierarchy is setup (bootstrap is not yet supported, so only 1 AMG component is built and applied)
+
+1                  % max_hrc, in bootstrap AMG, max hierarchies; NB: Here put 1 for single AMG component
+
+0.8                % desired convergence rate of the composite AMG; NB: This is not generally obtained if criterion on max_hrc is reached
+
+3                  % matchtype: 3 Suitor
+
+2                  % aggrsweeps; pairs aggregation steps. 0 pairs; 1 double pairs, etc ...
+
+0                  % aggr_type; 0 unsmoothed, 1 smoothed (not yet supported)
+
+39                 % max_levels; max number of levels built for the single hierarchy
+
+0                  % cycle_type: 0-Vcycle, 1-Hcycle, 2-Wcycle
+
+4                  % coarse_solver: 4 l1-Jacobi
+
+4                  % relax_type: 4 l1-Jacobi
+
+20                 % relaxnumber_coarse
+
+0                  % coarsesolver_type: 0 Distributed, 1 Replicated
+
+4                  % prerelax_sweeps
+
+4                  % postrelax_sweeps
+
+1000               % itnlim
+
+1.e-6              % rtol
  
 An example of configuration file is given in *AMGsettings*
