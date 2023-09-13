@@ -38,8 +38,8 @@ Usage: sample_main [--matrix <FILE_NAME> | --laplacian <SIZE>] [--preconditioner
 
 	      -m, --matrix <FILE_NAME>         Read the matrix from file <FILE_NAME>.
 	      -a, --laplacian <SIZE>           Generate a laplacian matrix whose size is <SIZE>^3.
-              -l, --configuration file         Generate a laplacian matrix of dimension N=nx x ny x nz replicated on NP=np x nq x nr tasks,
-                                               as defined in the configuration file, for a global matrix of dimension N*NP.  
+              -l, --configuration file         Generate a laplacian matrix whose size local is N=nx x ny x nz and it is replicated on
+                                               NP=np x nq x nr tasks, as defined in the configuration file, for a global matrix of size N*NP.  
 	      -s, --settings <FILE_NAME>       Read settings from file <FILE_NAME>.
 	      -p, --preconditioner <BOOL>      If 0 the preconditioner will not be applied, otherwise it will be applied. If the parameter 
 	                                       is not passed on the command line the preconditioner will be applied.
