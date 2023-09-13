@@ -4,10 +4,10 @@ NONE               % sol file NONE if not present
 1                  % max_hrc, in bootstrap AMG, max hierarchies; NB: Here put 1 for single AMG component
 0.8                % desired convergence rate of the composite AMG; NB: This is not generally obtained if criterion on max_hrc is reached
 3                  % matchtype: 3 Suitor
-2                  % aggrsweeps; pairs aggregation steps. 0 pairs; 1 double pairs, etc ...
+2                  % aggrsweeps; pairs aggregation steps corresponding to max size of aggregates. 0 for max size=2; 1 for max size=4, 2 for max size=8, etc ...
 0                  % aggr_type; 0 unsmoothed, 1 smoothed (not yet supported)
 39                 % max_levels; max number of levels built for the single hierarchy
-0                  % cycle_type: 0-Vcycle, 1-Hcycle, 2-Wcycle
+0                  % cycle_type: 0-Vcycle, 1-Hcycle, 2-Wcycle, 4 variable V-cycle
 4                  % coarse_solver: 4 l1-Jacobi
 4                  % relax_type: 4 l1-Jacobi
 20                 % relaxnumber_coarse
