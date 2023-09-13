@@ -54,7 +54,7 @@ mpirun -np 2 bin/sample_main -m ../test_matrix/poisson_100x100.mtx -s ../AMGsett
 
 mpirun -np 2 bin/sample_main -a 126 -s ../AMGsettings
 
-mpirun -np 2 bin/sample_main -l ../cfg_files/ -s ../AMGsettings
+mpirun -np 2 bin/sample_main -l ../cfg_files/lap3d_2.cfg -s ../AMGsettings
 
 ```
 
