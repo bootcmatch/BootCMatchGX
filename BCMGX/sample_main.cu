@@ -270,11 +270,11 @@ CSR* generateLocalLaplacian3D_mesh(itype nx, itype ny, itype nz, itype P, itype 
       taskmap[(allcoords[i*3+2]*Q*P)+(allcoords[i*3+1]*P)+(allcoords[i*3])]=i;
       itaskmap[i]=(allcoords[i*3+2]*Q*P)+(allcoords[i*3+1]*P)+(allcoords[i*3]);
   }
-  if(myid==0) {
-  	for(int i=0; i<nprocs; i++) {
-		printf("taskmap[%d]=%d, itaskmap[%d]=%d\n",i,taskmap[i],i,itaskmap[i]);
-	}
-  }
+//  if(myid==0) {
+//  	for(int i=0; i<nprocs; i++) {
+//		printf("taskmap[%d]=%d, itaskmap[%d]=%d\n",i,taskmap[i],i,itaskmap[i]);
+//	}
+//  }
   
   CSR *Alocal = CSRm::init(local_size, N, (local_size*7), true, false, false, N, ilower);
 // alloc COO 
