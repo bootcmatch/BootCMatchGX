@@ -690,11 +690,11 @@ CSR* join_MatrixMPI_all(CSR *Alocal){
       MPI_COMM_WORLD
     )
   );
-  if(myid==0) {
-         for(int i=0; i<nprocs; i++){
-		 printf("n[%d]=%d, nnzs[%d]=%d\n",i,row_ns[i],i,nnzs[i]);
- 	 }
-  }
+//  if(myid==0) {
+ //        for(int i=0; i<nprocs; i++){
+//		 printf("n[%d]=%d, nnzs[%d]=%d\n",i,row_ns[i],i,nnzs[i]);
+// 	 }
+ // }
 
   itype full_n = 0;
   itype full_nnz = 0;
