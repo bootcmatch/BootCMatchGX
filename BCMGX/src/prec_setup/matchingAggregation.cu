@@ -336,7 +336,8 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
           (*P)->m = Ai->n /* m_shifts[myid+1]-m_shifts[myid] */;
       }
 
-      *R = CSRm::T_multiproc(h->cusparse_h0, *P, Ai->n, true);
+      //*R = CSRm::T_multiproc(h->cusparse_h0, *P, Ai->n, true);
+      *R = CSRm::Transpose_multiproc(h->cusparse_h0, *P, Ai->n, true);
     
       (*P)->m = swp_m;
       CSRm::shift_cols(*P, m_shifts[myid]);
@@ -348,7 +349,8 @@ CSR* matchingAggregation(handles *h, buildData *amg_data, CSR *A, vector<vtype> 
       CSRm::shift_cols(*R, (*P)->row_shift);
       (*R)->row_shift = m_shifts[myid];
     }else{
-      *R = CSRm::T(h->cusparse_h0, *P);
+      //*R = CSRm::T(h->cusparse_h0, *P);
+      *R = CSRm::Transpose(*P);
     }
     if(DETAILED_TIMING && ISMASTER){
       cudaDeviceSynchronize();

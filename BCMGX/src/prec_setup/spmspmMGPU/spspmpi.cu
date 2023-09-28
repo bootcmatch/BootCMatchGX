@@ -395,7 +395,7 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
   ends[0] = P_n_per_process[0];  
   cum_p_n_per_process[0]=P_n_per_process[0]-1;
   for(int i=1; i<nprocs; i++){
-     cum_p_n_per_process[i]=cum_p_n_per_process[i-1] + (gstype) P_n_per_process[i];
+     cum_p_n_per_process[i]=cum_p_n_per_process[i-1] + (gstype) P_n_per_process[taskmap[i]];
      ends[i] = ends[i-1]+ ((gstype)  P_n_per_process[i]);
   }
   assert(ends[nprocs-1] == Alocal->full_n);
@@ -414,8 +414,8 @@ void compute_rows_to_rcv_CPU( CSR *Alocal, CSR *Plocal, vector<int> *_bitcol){
 	    fprintf(stderr,"Task %d, unexpected whichproc for col %ld (was %d), line=%d\n",myid,othercol[sothercol][j]+Alocal->row_shift,pwp,__LINE__);
             for(itype i=0; i<nprocs; i++) {
 	      fprintf(stderr,"cnt=%d,row_shift[%d]=%ld,end[%d]=%ld, cum_p_n_per_process[%d]=%ld,\n",cnt,i,row_shift[i],i,ends[i],i,cum_p_n_per_process[i]);
-	      exit(1);
 	    }
+	    exit(1);
     }
     countp[whichproc]++;
     aofwhichproc[countall]=whichproc;
@@ -702,7 +702,7 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
     // sync call to make async stream1 stream2 one event cp1 
     vector<itype> *dev_nnz_per_row_shift = NULL;
     if(nnz_per_row_shift->n>0) {
-        if(nnz_per_row_shift->n>8000000) {
+        if(nnz_per_row_shift->n>2000000) {
             fprintf(stderr,"Task %d, n=%d\n",myid,nnz_per_row_shift->n); 
             exit(0);
         }
@@ -781,7 +781,7 @@ CSR* nsparseMGPU_commu_new(handles *h, CSR *Alocal, CSR *Plocal, bool used_by_so
     gsstype cum_p_n_per_process[nprocs];
     cum_p_n_per_process[0]=P_n_per_process[0]-1;
     for(int j=1; j<nprocs; j++){
-     cum_p_n_per_process[j]=cum_p_n_per_process[j-1] + P_n_per_process[j];
+     cum_p_n_per_process[j]=cum_p_n_per_process[j-1] + P_n_per_process[taskmap[j]];
     }
     for(i=0; i<rows2bereceived; i++){r = whichprow[i];
       // count nnz per process for comunication

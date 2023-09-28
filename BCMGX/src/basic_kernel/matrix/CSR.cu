@@ -6,6 +6,7 @@
 #include "basic_kernel/halo_communication/extern2.h"
 
 #include "utility/function_cnt.h"
+#include <cub/cub.cuh> 
 
 int CSRm::choose_mini_warp_size(CSR *A){
 
@@ -828,6 +829,148 @@ CSR* CSRm::T(cusparseHandle_t cusparse_h, CSR* A){
   CHECK_DEVICE( cudaFree(buff_T) );
 
   return AT;
+}
+
+
+__global__ void _prepare_column_ptr(stype A_nrows, itype *A_row, itype *A_col, itype *T_row){
+  int tid = threadIdx.x + blockDim.x * blockIdx.x;
+  while ( tid < A_nrows ){ 
+    itype start_idx = A_row[tid];
+    itype end_idx = A_row[tid+1];
+    // Count the number of nnz per column
+    for (itype i=start_idx; i<end_idx; i++){
+      atomicAdd( &T_row[ A_col[i]+1 ], 1);   
+    }    
+    tid += blockDim.x * gridDim.x; 
+  }
+}
+
+__global__ void _write_row_indices(stype A_nrows, itype *A_row, itype *T_col){
+  int tid = threadIdx.x + blockDim.x * blockIdx.x;
+  while ( tid < A_nrows ){ 
+    itype start_idx = A_row[tid];
+    itype end_idx = A_row[tid+1];
+    for (itype i=start_idx; i<end_idx; i++){
+      T_col[i] = tid; 
+    }    
+    tid += blockDim.x * gridDim.x; 
+  }
+}
+
+#define MAX(a,b) (a > b ? a : b)
+
+CSR* CSRm::Transpose(CSR* A){
+  assert( A->on_the_device );
+  // --------------------------- Custom CudaMalloc ---------------------------------
+  CSR *AT = CSRm::init(A->m, A->n, A->nnz, true, true, A->is_symmetric, A->m, 0);
+  //CSR *AT = CSRm::init(n_rows, A->full_n, A->nnz, true, true, A->is_symmetric, A->m, 0);
+  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+  //CSR *AT = CSRm::init(n_rows, A->full_n, A->nnz, false, true, A->is_symmetric, A->m, 0);
+  //AT->val = CustomCudaMalloc::alloc_vtype(AT->nnz, (used_by_solver ? 0: 1));
+  //AT->col = CustomCudaMalloc::alloc_itype(AT->nnz, (used_by_solver ? 0: 1));
+  //AT->row = CustomCudaMalloc::alloc_itype((AT->n) +1, (used_by_solver ? 0: 1));
+  //AT->custom_alloced = true;
+  // -------------------------------------------------------------------------------
+ 
+  itype *temp_row, *temp_col, *temp_buff;
+  CHECK_DEVICE( cudaMalloc(&temp_row,   ((AT->n)+1)*sizeof(itype) )); 
+  CHECK_DEVICE( cudaMalloc(&temp_col,   (AT->nnz)*sizeof(itype) )); 
+  CHECK_DEVICE( cudaMalloc(&temp_buff,   (AT->nnz)*sizeof(itype) )); 
+  CHECK_DEVICE( cudaMemset(temp_row, 0, ((AT->n)+1)*sizeof(itype) ));
+
+  gridblock gb;
+  gb = gb1d(A->n, BLOCKSIZE);  
+  // STEP 1 --- Count the number of nnz values per column (the new row_idx vector)
+  _prepare_column_ptr<<<gb.g, gb.b>>>(A->n, A->row, A->col, temp_row); 
+
+  // STEP 2 --- Write row indices of A, they are the column indices of AT
+  _write_row_indices<<<gb.g, gb.b>>>(A->n, A->row, temp_col);
+
+  void     *d_temp_storage = NULL;
+  size_t   temp_stor_bytes_1 = 0, temp_stor_bytes_2 = 0, temp_stor_bytes_3 = 0 ;
+  // Determine temporary device storage requirements for inclusive prefix sum
+  cub::DeviceScan::InclusiveSum(d_temp_storage, temp_stor_bytes_1, temp_row, AT->row, (AT->n)+1);
+  // Determine temporary device storage requirements
+  cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_stor_bytes_2, A->col, temp_buff, A->val, AT->val, A->nnz);
+  // Determine temporary device storage requirements
+  cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_stor_bytes_3, A->col, temp_buff, temp_col, AT->col, A->nnz);
+
+  CHECK_DEVICE( cudaMalloc(&d_temp_storage,  MAX(temp_stor_bytes_1,MAX(temp_stor_bytes_2,temp_stor_bytes_3))    ));
+
+  // STEP 3 --- create AT->row
+  cub::DeviceScan::InclusiveSum(d_temp_storage, temp_stor_bytes_1, temp_row, AT->row, (AT->n)+1);
+
+  // A STABLE sorting algorithm MUST be used.
+  // STEP 4 --- create AT->val
+  cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_stor_bytes_2, A->col, temp_buff, A->val, AT->val, A->nnz);  
+  // STEP 5 --- create AT->col
+  cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_stor_bytes_3, A->col, temp_buff, temp_col, AT->col, A->nnz);
+
+  CHECK_DEVICE( cudaFree(d_temp_storage) );
+  CHECK_DEVICE( cudaFree(temp_col) );
+  CHECK_DEVICE( cudaFree(temp_buff) );
+  CHECK_DEVICE( cudaFree(temp_row) );
+
+  return AT;  
+}
+
+CSR* CSRm::Transpose_multiproc(cusparseHandle_t cusparse_h, CSR* A, stype n_rows, bool used_by_solver){
+
+  assert( A->on_the_device );
+  // --------------------------- Custom CudaMalloc ---------------------------------
+  //CSR *AT = CSRm::init(A->m, A->n, A->nnz, true, true, A->is_symmetric, A->m, 0);
+  //CSR *AT = CSRm::init(n_rows, A->full_n, A->nnz, true, true, A->is_symmetric, A->m, 0);
+  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+  CSR *AT = CSRm::init(n_rows, A->full_n, A->nnz, false, true, A->is_symmetric, A->m, 0);
+  AT->val = CustomCudaMalloc::alloc_vtype(AT->nnz, (used_by_solver ? 0: 1));
+  AT->col = CustomCudaMalloc::alloc_itype(AT->nnz, (used_by_solver ? 0: 1));
+  AT->row = CustomCudaMalloc::alloc_itype((AT->n) +1, (used_by_solver ? 0: 1));
+  AT->custom_alloced = true;
+  // -------------------------------------------------------------------------------
+  
+  itype *temp_row, *temp_col, *temp_buff;
+  CHECK_DEVICE( cudaMalloc(&temp_row,   ((AT->n)+1)*sizeof(itype) )); 
+  CHECK_DEVICE( cudaMalloc(&temp_col,   (AT->nnz)*sizeof(itype) )); 
+  CHECK_DEVICE( cudaMalloc(&temp_buff,   (AT->nnz)*sizeof(itype) )); 
+  //temp_row = CustomCudaMalloc::alloc_itype(AT->n+1, 0);
+  //temp_col = CustomCudaMalloc::alloc_itype(AT->nnz, 0);
+  //temp_buff = CustomCudaMalloc::alloc_itype(AT->nnz, 0);
+  CHECK_DEVICE( cudaMemset(temp_row, 0, ((AT->n)+1)*sizeof(itype) ));
+
+  gridblock gb;
+  gb = gb1d(A->n, BLOCKSIZE);  
+  // STEP 1 --- Count the number of nnz values per column (the new row_idx vector)
+  _prepare_column_ptr<<<gb.g, gb.b>>>(A->n, A->row, A->col, temp_row); 
+
+  // STEP 2 --- Write row indices of A, they are the column indices of AT
+  _write_row_indices<<<gb.g, gb.b>>>(A->n, A->row, temp_col);
+
+  void     *d_temp_storage = NULL;
+  size_t   temp_stor_bytes_1 = 0, temp_stor_bytes_2 = 0, temp_stor_bytes_3 = 0 ;
+  // Determine temporary device storage requirements for inclusive prefix sum
+  cub::DeviceScan::InclusiveSum(d_temp_storage, temp_stor_bytes_1, temp_row, AT->row, (AT->n)+1);
+  // Determine temporary device storage requirements
+  cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_stor_bytes_2, A->col, temp_buff, A->val, AT->val, A->nnz);
+  // Determine temporary device storage requirements
+  cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_stor_bytes_3, A->col, temp_buff, temp_col, AT->col, A->nnz);
+
+  CHECK_DEVICE( cudaMalloc(&d_temp_storage,  MAX(temp_stor_bytes_1,MAX(temp_stor_bytes_2,temp_stor_bytes_3))    ));
+
+  // STEP 3 --- create AT->row
+  cub::DeviceScan::InclusiveSum(d_temp_storage, temp_stor_bytes_1, temp_row, AT->row, (AT->n)+1);
+
+  // A STABLE sorting algorithm MUST be used.
+  // STEP 4 --- create AT->val
+  cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_stor_bytes_2, A->col, temp_buff, A->val, AT->val, A->nnz);  
+  // STEP 5 --- create AT->col
+  cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_stor_bytes_3, A->col, temp_buff, temp_col, AT->col, A->nnz);
+
+  CHECK_DEVICE( cudaFree(d_temp_storage) );
+  CHECK_DEVICE( cudaFree(temp_col) );
+  CHECK_DEVICE( cudaFree(temp_buff) );
+  CHECK_DEVICE( cudaFree(temp_row) );
+
+  return AT;  
 }
 
 

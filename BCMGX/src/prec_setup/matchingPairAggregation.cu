@@ -222,19 +222,23 @@ void matchingPairAggregation(handles *h, CSR *A, vector<vtype> *w, CSR **_P, CSR
 
     for(int i=0; i<nprocs; i++){
       mt_shifts[i]=tot_m;
-      tot_m += ms[itaskmap[i]];
+      tot_m += ms[taskmap[i]];
+//      tot_m += ms[itaskmap[i]];
+//      tot_m += ms[i];
     }
     for(int i=0; i<nprocs; i++){
-      m_shifts[i] = mt_shifts[itaskmap[i]];
+        m_shifts[i] = mt_shifts[itaskmap[i]];
+//      m_shifts[i] = mt_shifts[taskmap[i]];
     }
     //P->m = tot_m;
     //CSRm::shift_cols(P, m_shifts[myid]);
     //R = CSRm::T(h->cusparse_h0, P);
-    R = CSRm::T_multiproc(h->cusparse_h0, P, ms[myid], used_by_solver);
+    //R = CSRm::T_multiproc(h->cusparse_h0, P, ms[myid], used_by_solver);
+    R = CSRm::Transpose_multiproc(h->cusparse_h0, P, ms[myid], used_by_solver);
     //R->row += m_shifts[myid];
     //R->n = ms[myid];
     //R->m = A->full_n;
-//    printf("%d %d %d P_R_shift Task %d\n",cnt++,P->row_shift,m_shifts[myid],myid);
+//    printf("%d %d %d %d P_R_shift Task %d\n",cnt++,P->row_shift,m_shifts[myid],R->n,myid);
     CSRm::shift_cols(R, P->row_shift);
     R->row_shift = m_shifts[myid];
 
@@ -243,7 +247,8 @@ void matchingPairAggregation(handles *h, CSR *A, vector<vtype> *w, CSR **_P, CSR
     R->full_n = tot_m;
 
   }else{
-    R = CSRm::T(h->cusparse_h0, P);
+    //R = CSRm::T(h->cusparse_h0, P);
+    R = CSRm::Transpose(P);
   }
 
     if(0) fprintf(stderr,"Task %d reached line %d in matchingPairAggregation (%s)\n",myid,__LINE__,__FILE__);

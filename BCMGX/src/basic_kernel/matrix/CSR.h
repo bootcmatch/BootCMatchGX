@@ -117,7 +117,9 @@ namespace CSRm{
   CSR* CSRCSR_product_cuSPARSE(cusparseHandle_t handle, CSR *A, CSR *B, bool transA=false, bool transB=false);
   vector<vtype>* diag(CSR *A);
   CSR *T(cusparseHandle_t cusparse_h, CSR* A);
+  CSR *Transpose(CSR* A);
   CSR *T_multiproc(cusparseHandle_t cusparse_h, CSR* A, stype n_rows, bool used_by_solver);
+  CSR *Transpose_multiproc(cusparseHandle_t cusparse_h, CSR* A, stype n_rows, bool used_by_solver);
   CSR* CSRCSR_product(cusparseHandle_t handle, CSR *A, CSR *B, bool transA=false, bool transB=false);
   vector<vtype>* CSRVector_product_adaptive_miniwarp(cusparseHandle_t cusparse_h, CSR *A, vector<vtype> *x, vector<vtype> *y, vtype alpha=1., vtype beta=0.);
   vector<vtype>* shifted_CSRVector_product_adaptive_miniwarp(CSR *A, vector<vtype> *x, vector<vtype> *y, itype shift, vtype alpha=1., vtype beta=0.);

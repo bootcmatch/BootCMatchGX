@@ -66,7 +66,7 @@ void getMissing(CSR *A, vector<itype> **missing, CSR *R, gstype *row_shift){
 
   ends[0] = row_ns[0];
   for(itype i=1; i<nprocs; i++) {
-      ends[i] = row_ns[i] + ends[i-1];
+      ends[i] = row_ns[taskmap[i]] + ends[i-1];
   }
 
   if(R==NULL) {
