@@ -839,6 +839,10 @@ __global__ void _prepare_column_ptr(stype A_nrows, itype *A_row, itype *A_col, i
     itype end_idx = A_row[tid+1];
     // Count the number of nnz per column
     for (itype i=start_idx; i<end_idx; i++){
+      if (A_col[i] < 0){
+         printf("tid: %d --- A_col[%d]: %d \n", tid, i, A_col[i]); 
+         return;
+      }
       atomicAdd( &T_row[ A_col[i]+1 ], 1);   
     }    
     tid += blockDim.x * gridDim.x; 
