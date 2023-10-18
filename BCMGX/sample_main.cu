@@ -479,7 +479,7 @@ void check_and_fix_order(CSR * A) {
 
 #define USAGE "\nUsage: sample_main [--matrix <FILE_NAME> | --laplacian <SIZE>] [--preconditioner <BOOL>] --settings <FILE_NAME>\n\n"\
                "\tYou can specify only one out of the three available options: --matrix, --laplacian-3d and --laplacian\n\n"\
-	           "\t-m, --matrix <FILE_NAME>         Read the matrix from file <FILE_NAME>.\n"\
+	           "\t-m, --matrix <FILE_NAME>         Read the matrix from file <FILE_NAME>. Please note that this option works only in a mono-process setting.\n"\
 	           "\t-l, --laplacian-3d <FILE_NAME>   Read generation parameters from file <FILE_NAME>.\n"\
 		       "\t-a, --laplacian <SIZE>           Generate a matrix whose size is <SIZE>^3.\n"\
 	           "\t-s, --settings <FILE_NAME>       Read settings from file <FILE_NAME>.\n"\
@@ -550,6 +550,12 @@ int main(int argc, char **argv){
   // setup AMG:
   int myid, nprocs, device_id;
   StartMpi(&myid, &nprocs, &argc, &argv);
+  // The "read the matrix from file" option is available only in a single
+  // process setting. The option is not available in a multi-process setting 
+  if ( nprocs > 1 && opt == MTX){
+     printf(USAGE);
+     exit(EXIT_FAILURE);
+  }
  
   if(getenv("SCALENNZMISSING")) {
      scalennzmiss=atoi(getenv("SCALENNZMISSING"));

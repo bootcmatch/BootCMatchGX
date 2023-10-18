@@ -36,7 +36,7 @@ Usage: sample_main [--matrix <FILE_NAME> | --laplacian <SIZE>] [--preconditioner
        
        You can specify only one out of the available options: --matrix and --laplacian
 
-	      -m, --matrix <FILE_NAME>         Read the matrix from file <FILE_NAME>.
+	      -m, --matrix <FILE_NAME>         Read the matrix from file <FILE_NAME>. Please note that this option works only in a mono-process setting.
 	      -a, --laplacian <SIZE>           Generate a laplacian matrix whose size is <SIZE>^3.
               -l, --configuration file         Generate a laplacian matrix whose size local is N=nx x ny x nz and it is replicated on
                                                NP=np x nq x nr tasks, as defined in the configuration file, for a global matrix of size N*NP.  
@@ -47,15 +47,24 @@ Usage: sample_main [--matrix <FILE_NAME> | --laplacian <SIZE>] [--preconditioner
 
 The directory *test_matrix* contains a matrix in the *Matrix Market* format that can be used with the *--matrix* mode. Finally the file *AMGsettings* contains an example of a configuration file that can be used for the *--settings* option. 
 
-The following are two examples of how you can run the solver in the three different running modes using 2 MPI processes:
+> Please note that the *--matrix* option works only in a mono-process setting.
+
+The following are three examples of how you can run the solver in the three different running modes using 1 MPI process:
 
 ```sh
-mpirun -np 2 bin/sample_main -m ../test_matrix/poisson_100x100.mtx -s ../AMGsettings
+mpirun -np 1 bin/sample_main -m ../test_matrix/poisson_100x100.mtx -s ../AMGsettings
 
+mpirun -np 1 bin/sample_main -a 126 -s ../AMGsettings
+
+mpirun -np 1 bin/sample_main -l ./cfg_files/lap3d_1.cfg -s ../AMGsettings
+```
+
+The following are two examples of how you can run the solver in the two different running modes using 2 MPI processes:
+
+```sh
 mpirun -np 2 bin/sample_main -a 126 -s ../AMGsettings
 
-mpirun -np 2 bin/sample_main -l ../cfg_files/lap3d_2.cfg -s ../AMGsettings
-
+mpirun -np 2 bin/sample_main -l ./cfg_files/lap3d_2.cfg -s ../AMGsettings
 ```
 
 ### Configuration file
