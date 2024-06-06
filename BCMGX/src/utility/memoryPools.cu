@@ -2,37 +2,44 @@
 #define local_pools 3
 
 #include "utility/function_cnt.h"
+#include "utility/globals.h"
+#include "utility/utils.h"
 
-namespace MemoryPool{
+namespace MemoryPool {
 
-    void **local;
-    void **global;
+void** local;
+void** global;
 
-    void initContext(itype full_n, itype n){
-      MemoryPool::local = (void**) malloc(sizeof(void*)*local_pools);
-      CHECK_HOST(MemoryPool::local);
+void initContext(itype full_n, itype n)
+{
 
-      for(int i=0; i<local_pools; i++){
+    MemoryPool::local = (void**)Malloc(sizeof(void*) * local_pools);
+    // CHECK_HOST(MemoryPool::local);
+
+    for (int i = 0; i < local_pools; i++) {
         cudaMalloc_CNT
-        CHECK_DEVICE( cudaMalloc(&MemoryPool::local[i], sizeof(vtype) * n) );
-      }
-
-      MemoryPool::global = (void**) malloc(sizeof(void*)*global_pools);
-      CHECK_HOST(MemoryPool::local);
-      for(int i=0; i<global_pools; i++){
-        cudaMalloc_CNT
-        CHECK_DEVICE( cudaMalloc(&MemoryPool::global[i], sizeof(vtype) * full_n) );
-      }
-
+            CHECK_DEVICE(cudaMalloc(&MemoryPool::local[i], sizeof(vtype) * n));
     }
 
-    void freeContext(){
-      for(int i=0; i<local_pools; i++){
-        CHECK_DEVICE( cudaFree(local[i]) );
-      }
-
-      for(int i=0; i<global_pools; i++){
-        CHECK_DEVICE( cudaFree(global[i]) );
-      }
+    if (global_pools) {
+        MemoryPool::global = (void**)Malloc(sizeof(void*) * global_pools);
+        // CHECK_HOST(MemoryPool::local);
     }
+
+    for (int i = 0; i < global_pools; i++) {
+        cudaMalloc_CNT
+            CHECK_DEVICE(cudaMalloc(&MemoryPool::global[i], sizeof(vtype) * full_n));
+    }
+}
+
+void freeContext()
+{
+    for (int i = 0; i < local_pools; i++) {
+        CHECK_DEVICE(cudaFree(local[i]));
+    }
+
+    for (int i = 0; i < global_pools; i++) {
+        CHECK_DEVICE(cudaFree(global[i]));
+    }
+}
 }

@@ -1,95 +1,190 @@
-CC = nvcc
-NVCC_FLAG = -DOMPI_SKIP_MPICXX -std=c++14 
-GPU_ARCH = -arch=sm_70 -m64
-MPI_DIR=/usr/local
-#CUB_PATH = ../EXTERNAL/nsparse-master/cub-1.7.4/cub
-CUB_PATH = .
-NSPARSE_PATH = ../EXTERNAL/nsparse-master/cuda-c
-NSPARSE_GPU_ARCH = -arch=sm_70 -m64
-LIBS = -lcudart -lcusparse -lcublas -lcusolver -lcurand -L$(MPI_DIR)/lib -lmpi -lnvToolsExt
-#INCLUDE = -Isrc  -I$(MPI_DIR)/include -I$(NSPARSE_PATH)/inc -I$(CUB_PATH)
-INCLUDE = -Isrc  -I$(MPI_DIR)/include -I$(NSPARSE_PATH)/inc
-OPT = -O3 -std=c++14 -DUSE_NVTX
+include config.mk
 
-MAIN = sample_main.cu
+.PHONY: clean prepare
 
-BUILDDIR    := obj
-TARGETDIR   := bin
+all: prepare \
+	$(TARGETDIR)/main \
+	$(TARGETDIR)/checkAndFixOrder \
+	$(TARGETDIR)/generate \
+	$(TARGETDIR)/collectMtx \
+	$(TARGETDIR)/compareSolutions
 
-all: $(TARGETDIR)/sample_main
+include objects.mk
 
-OBJECTS = $(BUILDDIR)/matchingAggregation.o $(BUILDDIR)/relax.o $(BUILDDIR)/distribuite.o $(BUILDDIR)/GAMG_cycle.o $(BUILDDIR)/FCG.o $(BUILDDIR)/bcmgx.o $(BUILDDIR)/utils.o $(BUILDDIR)/CSR.o $(BUILDDIR)/AMG.o $(BUILDDIR)/matrixIO.o  $(BUILDDIR)/myMPI.o $(BUILDDIR)/nsparse.o  $(BUILDDIR)/spspmpi.o $(BUILDDIR)/handles.o $(BUILDDIR)/scalar.o $(BUILDDIR)/vector.o $(BUILDDIR)/solutionAggregator.o $(BUILDDIR)/getmct.o $(BUILDDIR)/local_permutation.o $(BUILDDIR)/custom_cudamalloc.o $(BUILDDIR)/extern.o
+# ==============================================================================
+# $(TARGETDIR)/main
+# ==============================================================================
 
-$(TARGETDIR)/sample_main: $(MAIN) $(OBJECTS)
-	$(CC) -g $^ -o $@ $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $(LIBS) $(OPT)
+$(TARGETDIR)/main: src/main.cu $(OBJECTS)
+	$(NVCC) $^ -o $@ $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $(LIBS) $(NVCC_OPT)
 
-$(BUILDDIR)/matchingAggregation.o: src/prec_setup/matchingAggregation.cu src/prec_setup/matchingPairAggregation.cu src/prec_setup/matching.cu src/prec_setup/suitor.cu src/utility/memoryPools.cu src/prec_setup/bootstrap.cu
-	mkdir -p ${BUILDDIR} ${TARGETDIR}
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) src/prec_setup/matchingAggregation.cu  $(OPT)
+# ==============================================================================
+# $(TARGETDIR)/checkAndFixOrder
+# ==============================================================================
 
-$(BUILDDIR)/relax.o: src/basic_kernel/smoother/relaxation.cu src/basic_kernel/smoother/relaxation_sm.cu
-	mkdir -p ${BUILDDIR} ${TARGETDIR}
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) src/basic_kernel/smoother/relaxation.cu $(OPT)
-	
-$(BUILDDIR)/distribuite.o: src/utility/distribuite.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
-	
-$(BUILDDIR)/GAMG_cycle.o: src/prec_apply/GAMG_cycle.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
-	
-$(BUILDDIR)/FCG.o: src/solver/FCG.cu
-	mkdir -p ${BUILDDIR} ${TARGETDIR}
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
+$(TARGETDIR)/checkAndFixOrder: src/checkAndFixOrder.cu $(OBJECTS)
+	$(NVCC) $^ -o $@ $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $(LIBS) $(NVCC_OPT)
 
-$(BUILDDIR)/bcmgx.o: src/solver/bcmgx.cu
-	mkdir -p ${BUILDDIR} ${TARGETDIR}
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
+# ==============================================================================
+# $(TARGETDIR)/generate
+# ==============================================================================
 
-$(BUILDDIR)/CSR.o: src/basic_kernel/matrix/CSR.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
+$(TARGETDIR)/generate: src/generate.cu $(OBJECTS)
+	$(NVCC) $^ -o $@ $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $(LIBS) $(NVCC_OPT)
 
-$(BUILDDIR)/scalar.o: src/basic_kernel/matrix/scalar.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
+# ==============================================================================
+# $(TARGETDIR)/collectMtx
+# ==============================================================================
 
-$(BUILDDIR)/vector.o: src/basic_kernel/matrix/vector.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
+$(TARGETDIR)/collectMtx: src/collectMtx.cu $(OBJECTS)
+	$(NVCC) $^ -o $@ $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $(LIBS) $(NVCC_OPT)
 
-$(BUILDDIR)/utils.o: src/utility/utils.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
+# ==============================================================================
+# $(TARGETDIR)/compareSolutions
+# ==============================================================================
 
-$(BUILDDIR)/handles.o: src/utility/handles.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
+$(TARGETDIR)/compareSolutions: src/compareSolutions.cu $(OBJECTS)
+	$(NVCC) $^ -o $@ $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $(LIBS) $(NVCC_OPT)
 
-$(BUILDDIR)/matrixIO.o: src/basic_kernel/matrix/matrixIO.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
+# ==============================================================================
+# clean
+# ==============================================================================
 
-$(BUILDDIR)/myMPI.o: src/utility/myMPI.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
-
-$(BUILDDIR)/AMG.o: src/prec_setup/AMG.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
-
-$(BUILDDIR)/getmct.o: src/prec_setup/spmspmMGPU/getmct.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
-
-$(BUILDDIR)/spspmpi.o: src/prec_setup/spmspmMGPU/spspmpi.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
-
-$(BUILDDIR)/solutionAggregator.o: src/basic_kernel/halo_communication/halo_communication.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
-
-$(BUILDDIR)/extern.o: src/basic_kernel/halo_communication/extern.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
-
-$(BUILDDIR)/local_permutation.o: src/basic_kernel/halo_communication/local_permutation.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
-
-$(BUILDDIR)/custom_cudamalloc.o: src/basic_kernel/custom_cudamalloc/custom_cudamalloc.cu
-	$(CC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
-	
-$(BUILDDIR)/nsparse.o: $(NSPARSE_PATH)/src/kernel/kernel_spgemm_hash_d.cu
-	$(CC) -c -DDOUBLE -o $@ $(LIBS) $(INCLUDE) $(NSPARSE_GPU_ARCH) $(NVCC_FLAG) $^ $(OPT)
-	
 clean:
-	rm $(BUILDDIR)/*.o $(TARGETDIR)/*
-	
+	rm -Rf $(BUILDDIR) $(TARGETDIR) $(TESTOUTDIR)
+
+# ==============================================================================
+# format
+# ==============================================================================
+
+format:
+	$(FORMATTER) $(CU_SRCS) $(H_SRCS)
+
+# ==============================================================================
+# lint
+# ==============================================================================
+
+lintcpp:
+ifdef CPP_SRCS
+	$(LINTER) -checks="$(LINTER_CHECKS)" $(CPP_SRCS) $(CPP_TEST_SRCS) -- $(LINTER_FLAGS)
+endif
+
+lintcu:
+ifdef CU_SRCS
+	$(LINTER) -checks="$(LINTER_CHECKS)" $(CU_SRCS) $(CU_TEST_SRCS) -- $(LINTER_FLAGS)
+endif
+
+lint: lintcpp lintcu
+
+listchecks:
+	clang-tidy -checks=* --list-checks
+
+# ==============================================================================
+# prepare
+# ==============================================================================
+
+prepare:
+	mkdir -p ${TARGETDIR}
+	mkdir -p ${TARGETDIR}/test
+	mkdir -p ${TESTOUTDIR}
+
+# ==============================================================================
+# generate
+# ==============================================================================
+
+generate: prepare $(TARGETDIR)/generate
+	$(TARGETDIR)/generate \
+		--verbose \
+		--size 10 \
+		--out $(SOURCEDIR)/test/data/mtx/dense_matrix_10x10.mtx
+
+	$(TARGETDIR)/generate \
+		--verbose \
+		--sparse \
+		--size 10 \
+		--out $(SOURCEDIR)/test/data/mtx/sparse_matrix_10x10.mtx
+
+# ==============================================================================
+# testCompareSolutions
+# ==============================================================================
+
+testCompareSolutions: prepare $(TARGETDIR)/compareSolutions
+	$(TARGETDIR)/compareSolutions \
+		$(SOURCEDIR)/test/data/cmp/vec1.txt \
+		$(SOURCEDIR)/test/data/cmp/vec2.txt
+
+# ==============================================================================
+# $(TARGETDIR)/test
+# ==============================================================================
+
+$(TARGETDIR)/test/%: $(SOURCEDIR)/test/%.cu $(OBJECTS)
+	$(NVCC) $^ -o $@ $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $(LIBS) $(NVCC_OPT)
+
+# ==============================================================================
+# Unit tests
+# ==============================================================================
+
+test: \
+	testCore \
+	testCSR \
+	testGenerators \
+	testCommunication
+
+include testCore.mk
+include testCSR.mk
+include testGenerators.mk
+include testCommunication.mk
+
+testAggregateVector: $(TARGETDIR)/test/testAggregateVector
+	$(MPIRUN) -np 32 $(CUDA_MEMCHECK) $(TARGETDIR)/test/testAggregateVector
+
+# ==============================================================================
+# Regression tests
+# ==============================================================================
+
+STOP_ON_ERROR = 0
+ENABLE_LOG = 0
+
+ifeq ($(STOP_ON_ERROR),1)
+EXIT_TEST = exit 1
+else
+EXIT_TEST = :
+endif
+
+SOLVER         = CGHS FCG
+PRECONDITIONER = noPreconditioner l1Jacobi BCMG
+TEST_CONFIG    = lap3d_7p_a50 \
+	lap3d_7p_50x50x50_1x1x1 lap3d_7p_50x50x50_2x1x1 \
+	lap3d_7p_50x50x50_2x2x1 lap3d_7p_50x50x50_2x2x2 \
+	lap3d_27p_50x50x50_1x1x1 lap3d_27p_50x50x50_2x1x1 \
+	lap3d_27p_50x50x50_2x2x1 lap3d_27p_50x50x50_2x2x2
+
+regressionTests: $(TARGETDIR)/main
+	for s in $(SOLVER); do\
+		for p in $(PRECONDITIONER); do\
+			for c in $(TEST_CONFIG); do\
+				make -f launchAndCompare.mk\
+					nproc=4\
+					solver=$$s\
+					preconditioner=$$p\
+					config=$$c \
+					ENABLE_LOG=$(ENABLE_LOG) \
+				| tee $(TESTOUTDIR)/test$${s}_$${p}_$${c}.makeout;\
+				if [ `echo "$${PIPESTATUS[@]}" | tr -s ' ' + | bc` -ne 0 ]; then\
+					echo "Regression test with SOLVER=$$s PRECONDITIONER=$$p TEST_CONFIG=$$c failed. Try launching:";\
+					echo "make regressionTests SOLVER=$$s PRECONDITIONER=$$p TEST_CONFIG=$$c STOP_ON_ERROR=1 ENABLE_LOG=1" USE_CUDA_MEMCHECK=1;\
+					$(EXIT_TEST);\
+				fi;\
+			done;\
+		done;\
+	done;
+
+helpRegressionTests:
+	@echo make regressionTests - Available parameters:
+	@echo "USE_CUDA_MEMCHECK: 0 | 1, default: 0"
+	@echo "STOP_ON_ERROR    : 0 | 1, default: 0"
+	@echo "ENABLE_LOG       : 0 | 1, default: 0"
+	@echo "SOLVER           : $(SOLVER)"
+	@echo "PRECONDITIONER   : $(PRECONDITIONER)"
+	@echo "TEST_CONFIG      : $(TEST_CONFIG)"
+

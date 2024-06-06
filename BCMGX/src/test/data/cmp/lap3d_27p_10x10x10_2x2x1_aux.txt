@@ -1,0 +1,3 @@
+FLAG = 0
+ITER = 20
+RELRES = 9.465859e-06

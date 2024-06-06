@@ -1,0 +1,3 @@
+FLAG = 0
+ITER = 54
+RELRES = 6.778148e-06

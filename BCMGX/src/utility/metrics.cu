@@ -1,0 +1,32 @@
+#include "metrics.h"
+
+float TOTAL_SOLRELAX_TIME = 0.;
+float TOTAL_RESTGAMG_TIME = 0.;
+
+float TOTAL_PRECAPPLY_TIME = 0.;
+float TOTAL_SPMV_TIME = 0.;
+float TOTAL_DOTP_TIME = 0.;
+float TOTAL_AXPY_TIME = 0.;
+float TOTAL_ALLREDUCE_TIME = 0.;
+float TOTAL_SWORK_TIME = 0.;
+float TOTAL_CUDAMEMCOPY_TIME = 0.;
+float TOTAL_NORM_TIME = 0.;
+
+float TOTAL_CSRVECTOR_TIME = 0.;
+float TOTAL_TRIPLEPROD_TIME = 0.;
+float TOTAL_DOUBLEMERGED_TIME = 0.;
+float TOTAL_RESTPRE_TIME = 0.;
+
+// Suitor
+float SUITOR_TIME = 0;
+float TOTAL_MUL_TIME = 0;
+float TOTAL_MATCH_TIME = 0;
+float TOTAL_SETUP_TIME = 0;
+float TOTAL_MEM_TIME = 0;
+float TOTAL_RELAX_TIME = 0;
+float TOTAL_SHIFTED_CSRVEC = 0;
+float TOTAL_MAKE_P = 0;
+float TOTAL_TRA_P = 0;
+float TOTAL_MAKEAHW_TIME = 0;
+float TOTAL_MATCHINGPAIR_TIME = 0;
+float TOTAL_OTHER_TIME = 0;

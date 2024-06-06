@@ -15,7 +15,7 @@
 
 #include <cuda.h>
 #include <helper_cuda.h>
-#include <cusparse_v2.h>
+// #include <cusparse_v2.h>
 
 #include <thrust/sort.h>
 #include <thrust/device_vector.h>
@@ -26,7 +26,7 @@
 #include <nsparse.h>
 #include <nsparse_asm.h>
 
-#include "../../BCMGX/src/basic_kernel/custom_cudamalloc/custom_cudamalloc.h"
+#include "../../BCMGX/src/custom_cudamalloc/custom_cudamalloc.h"
 
 #define NOMPI
 #include "../../BCMGX/src/utility/function_cnt.h"

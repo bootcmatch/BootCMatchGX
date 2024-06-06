@@ -1,0 +1,9 @@
+backup.sh
+BCMGX/bin
+BCMGX/data
+BCMGX/obj
+BCMGX/src/test/data/cmp/lap3d_7p_50x50x50_2x2*
+BCMGX/src/test/data/cmp/lap3d_27p_50x50x50_2x2*
+BCMGX/src/test/data/mtx/lap3d_7p_50x50x50_2x2*
+BCMGX/src/test/data/mtx/lap3d_27p_50x50x50_2x2*
+BCMGX/testout

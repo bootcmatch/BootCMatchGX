@@ -1,5 +1,6 @@
 #include <cusparse_v2.h>
-#include "prec_setup/spmspmMGPU/csrseg.h"
+//#include "prec_setup/spmspmMGPU/csrseg.h"
+#include "datastruct/csrlocinfo.h"
 
 #ifdef FLOAT
 typedef float real;
