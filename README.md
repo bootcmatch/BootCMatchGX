@@ -95,9 +95,13 @@ The configuration file defines the preconditioning and solving procedure.
 The configuration parameters are:
 
 NONE            % rhs file NONE if not present
+
 NONE            % sol file NONE if not present
+
 FCG             % solver_type: CGHS | FCG
+
 MULTIPLICATIVE  % bootstrap_type: MULTIPLICATIVE; NB: This is the composition rule when bootstrap is applied and more than 1 AMG hierarchy is setup
+
 1               % max_hrc, in bootstrap AMG, max hierarchies; NB: Here put 1 for single AMG component
 0.8             % desired convergence rate of the composite AMG; NB: This is not generally obtained if criterion on max_hrc is reached
 SUITOR          % matchtype: SUITOR
