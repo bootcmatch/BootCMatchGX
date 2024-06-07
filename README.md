@@ -174,3 +174,9 @@ Please, find an updated version of the supported options by invoking:
 
     make helpRegressionTests
 	
+### Important operations
+
+The following three unit tests can be taken as examples for important operations:
+* BCMGX/src/test/testMatrixVectorProduct.cu;
+* BCMGX/src/test/testMatrixMatrixProduct.cu;
+* BCMGX/src/test/testMatrixMatching.cu.
