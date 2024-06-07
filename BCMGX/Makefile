@@ -6,6 +6,7 @@ all: prepare \
 	$(TARGETDIR)/main \
 	$(TARGETDIR)/checkAndFixOrder \
 	$(TARGETDIR)/generate \
+	$(TARGETDIR)/generateLaplacian3D \
 	$(TARGETDIR)/collectMtx \
 	$(TARGETDIR)/compareSolutions
 
@@ -30,6 +31,13 @@ $(TARGETDIR)/checkAndFixOrder: src/checkAndFixOrder.cu $(OBJECTS)
 # ==============================================================================
 
 $(TARGETDIR)/generate: src/generate.cu $(OBJECTS)
+	$(NVCC) $^ -o $@ $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $(LIBS) $(NVCC_OPT)
+
+# ==============================================================================
+# $(TARGETDIR)/generateLaplacian3D
+# ==============================================================================
+
+$(TARGETDIR)/generateLaplacian3D: src/generateLaplacian3D.cu $(OBJECTS)
 	$(NVCC) $^ -o $@ $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $(LIBS) $(NVCC_OPT)
 
 # ==============================================================================
@@ -92,7 +100,7 @@ prepare:
 # generate
 # ==============================================================================
 
-generate: prepare $(TARGETDIR)/generate
+generate: prepare $(TARGETDIR)/generate $(TARGETDIR)/generateLaplacian3D $(TARGETDIR)/collectMtx
 	$(TARGETDIR)/generate \
 		--verbose \
 		--size 10 \
@@ -103,6 +111,29 @@ generate: prepare $(TARGETDIR)/generate
 		--sparse \
 		--size 10 \
 		--out $(SOURCEDIR)/test/data/mtx/sparse_matrix_10x10.mtx
+
+	for GEN in 7p 27p; do\
+		for DIM in 10; do\
+			for P in 1 2; do\
+				for Q in 1 2; do\
+					for R in 1 2; do\
+						if [ ! -f $(SOURCEDIR)/test/data/mtx/lap3d_$${GEN}_$${DIM}x$${DIM}x$${DIM}_$${P}x$${Q}x$${R}.mtx ]; then\
+							rm -f /tmp/lap3d_$${GEN}_$${DIM}x$${DIM}x$${DIM}_$${P}x$${Q}x$${R}_*_$$(($$P * $$Q * $$R));\
+							$(MPIRUN) --oversubscribe -np $$(($$P * $$Q * $$R)) $(CUDA_MEMCHECK) \
+								$(TARGETDIR)/generateLaplacian3D \
+									-g $${GEN} \
+									-x $${DIM} -y $${DIM} -z $${DIM} \
+									-P $${P} -Q $${Q} -R $${R} \
+									--out /tmp/lap3d_$${GEN}_$${DIM}x$${DIM}x$${DIM}_$${P}x$${Q}x$${R};\
+							$(TARGETDIR)/collectMtx \
+								$(SOURCEDIR)/test/data/mtx/lap3d_$${GEN}_$${DIM}x$${DIM}x$${DIM}_$${P}x$${Q}x$${R}.mtx \
+								/tmp/lap3d_$${GEN}_$${DIM}x$${DIM}x$${DIM}_$${P}x$${Q}x$${R}_*_$$(($$P * $$Q * $$R));\
+						fi;\
+					done;\
+				done;\
+			done;\
+		done;\
+	done
 
 # ==============================================================================
 # testCompareSolutions
@@ -159,7 +190,7 @@ TEST_CONFIG    = lap3d_7p_a50 \
 	lap3d_27p_50x50x50_1x1x1 lap3d_27p_50x50x50_2x1x1 \
 	lap3d_27p_50x50x50_2x2x1 lap3d_27p_50x50x50_2x2x2
 
-regressionTests: $(TARGETDIR)/main
+regressionTests: $(TARGETDIR)/main generate
 	for s in $(SOLVER); do\
 		for p in $(PRECONDITIONER); do\
 			for c in $(TEST_CONFIG); do\

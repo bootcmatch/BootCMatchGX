@@ -25,7 +25,7 @@ LINTER_FLAGS     = $(INCLUDE) --cuda-gpu-arch=$(CUDA_GPU_ARCH) --cuda-path=$(CUD
 LINTER_CHECKS    = -*,cert-*
 LINTER_ISYSTEM   = -isystem /usr/local/cuda/include
 
-LAPACK_LIB = ../../lapack-master/
+LAPACK_LIB = ../../../lapack-master/
 LAPACK_INC = $(LAPACK_LIB)/LAPACKE/include/
 CBLAS_INC = $(LAPACK_LIB)/CBLAS/include/
 CBLAS_LIB = $(LAPACK_LIB)
