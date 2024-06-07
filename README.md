@@ -7,8 +7,10 @@ of the adaptive AMG method, as preconditioner of an efficient version of the Con
 distributed nodes hosting Nvidia GPUs are available.
 
 This software project has been partially supported by:
+
 -TEXTAROSSA: Towards EXtreme scale Technologies and Accelerators for euROhpc hw/Sw Supercomputing Applications for exascale, a EuroHPC-JU Project, Horizon 2020 Program for Research and Innovation, 
 funded by European Commission (EC), Project ID: 956831.
+
 -ICSC: the Italian Research Center on High-Performance Computing, Big Data and Quantum Computing, funded by MUR - Next Generation EU (NGEU)
 
 Main reference:
@@ -103,22 +105,39 @@ FCG             % solver_type: CGHS | FCG
 MULTIPLICATIVE  % bootstrap_type: MULTIPLICATIVE; NB: This is the composition rule when bootstrap is applied and more than 1 AMG hierarchy is setup
 
 1               % max_hrc, in bootstrap AMG, max hierarchies; NB: Here put 1 for single AMG component
+
 0.8             % desired convergence rate of the composite AMG; NB: This is not generally obtained if criterion on max_hrc is reached
+
 SUITOR          % matchtype: SUITOR
+
 2               % aggrsweeps; pairs aggregation steps. 0 pairs; 1 double pairs, etc ...
+
 0               % aggr_type; 0 unsmoothed, 1 smoothed (not yet supported)
+
 39              % max_levels; max number of levels built for the single hierarchy
+
 V_CYCLE         % cycle_type: V_CYCLE
+
 L1_JACOBI       % coarse_solver: L1_JACOBI
+
 L1_JACOBI       % relax_type: L1_JACOBI
+
 20              % relaxnumber_coarse
+
 4               % prerelax_sweeps
+
 4               % postrelax_sweeps
+
 2000            % itnlim
+
 1.e-6           % rtol
+
 1               % stop criterion (0 absolute, 1 relative)
+
 BCMG            % preconditioner: NONE | L1_JACOBI | BCMG
+
 4               % l1-jacobi preconditioner iterations
+
 1               % If 1 display norm
 
 ### More examples
