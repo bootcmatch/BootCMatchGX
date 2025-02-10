@@ -1,9 +1,9 @@
 #include "utility/handles.h"
+#include "utility/memory.h"
 
 handles* Handles::init()
 {
-
-    handles* h = (handles*)malloc(sizeof(handles));
+    handles* h = MALLOC(handles, 1);
     CHECK_HOST(h);
 
     CHECK_CUBLAS(cublasCreate(&(h->cublas_h)));
@@ -27,5 +27,5 @@ void Handles::free(handles* h)
     CHECK_DEVICE(cudaStreamDestroy(h->stream4));
     CHECK_DEVICE(cudaStreamDestroy(h->stream_free));
 
-    std::free(h);
+    FREE(h);
 }

@@ -1,10 +1,13 @@
+#include "op/basic.h"
 #include "utility/cudamacro.h"
-#include "utility/function_cnt.h"
+#include "utility/memory.h"
+#include "utility/profiling.h"
 #include "utility/utils.h"
-#include "vector.h"
 
+#include "vector.h"
 #include <string.h>
 #include <type_traits>
+
 #include <unistd.h>
 
 #define BUFSIZE 1024
@@ -14,15 +17,11 @@ namespace Vector {
 template <typename T>
 vector<T>* init(unsigned int n, bool allocate_mem, bool on_the_device)
 {
-
     if (n == 0) {
         fprintf(stderr, "error in Vector::init: n as int = %d, n as unsigned int = %u\n", n, n);
     }
     assert(n > 0);
-    vector<T>* v = NULL;
-    // on the host
-    v = (vector<T>*)Malloc(sizeof(vector<T>));
-    CHECK_HOST(v);
+    vector<T>* v = MALLOC(vector<T>, 1);
 
     v->n = n;
     v->on_the_device = on_the_device;
@@ -30,13 +29,10 @@ vector<T>* init(unsigned int n, bool allocate_mem, bool on_the_device)
     if (allocate_mem) {
         if (on_the_device) {
             // on the device
-            cudaError_t err;
-            err = cudaMalloc((void**)&v->val, n * sizeof(T));
-            CHECK_DEVICE(err);
+            v->val = CUDA_MALLOC(T, n);
         } else {
             // on the host
-            v->val = (T*)Malloc(n * sizeof(T));
-            CHECK_HOST(v->val);
+            v->val = MALLOC(T, n);
         }
     }
     return v;
@@ -45,21 +41,11 @@ vector<T>* init(unsigned int n, bool allocate_mem, bool on_the_device)
 template <typename T>
 vectordh<T>* initdh(int n)
 {
-
     assert(n > 0);
-    vectordh<T>* v = NULL;
-
-    v = (vectordh<T>*)Malloc(sizeof(vectordh<T>));
-    CHECK_HOST(v);
-
+    vectordh<T>* v = MALLOC(vectordh<T>, 1, true);
     v->n = n;
-
-    cudaError_t err;
-    err = cudaMalloc((void**)&v->val, n * sizeof(T));
-    CHECK_DEVICE(err);
-
-    v->val_ = (T*)Malloc(n * sizeof(T));
-    CHECK_HOST(v->val_);
+    v->val = CUDA_MALLOC(T, n, true);
+    v->val_ = MALLOC(T, n, true);
 
     return v;
 }
@@ -83,15 +69,12 @@ void copydhToH(vectordh<T>* v)
 template <typename T>
 void freedh(vectordh<T>* v)
 {
-
-    cudaError_t err;
-    err = cudaFree(v->val);
-    CHECK_DEVICE(err);
+    CUDA_FREE(v->val);
 
     assert(v->val_);
-    std::free(v->val_);
+    FREE(v->val_);
 
-    std::free(v);
+    FREE(v);
 }
 
 template <typename T>
@@ -142,15 +125,10 @@ void fillWithValueWithOff(vector<T>* v, T value, itype n, itype off)
 template <typename T>
 vector<T>* clone(vector<T>* a)
 {
-
     vector<T>* b = NULL;
     if (a->on_the_device) {
-        Vectorinit_CNT
-            b
-            = Vector::init<T>(a->n, true, true);
-
-        cudaError_t err;
-        err = cudaMemcpy(b->val, a->val, b->n * sizeof(T), cudaMemcpyDeviceToDevice);
+        b = Vector::init<T>(a->n, true, true);
+        cudaError_t err = cudaMemcpy(b->val, a->val, b->n * sizeof(T), cudaMemcpyDeviceToDevice);
         CHECK_DEVICE(err);
     } else {
         b = Vector::init<T>(a->n, true, false);
@@ -163,19 +141,14 @@ vector<T>* clone(vector<T>* a)
 template <typename T>
 vector<T>* localize_global_vector(vector<T>* global_v, int local_len, int shift)
 {
-
     if (global_v->n < local_len + shift) {
         printf("(global_v->n = %d) < (local_len = %d) + (shift = %d)\n", global_v->n, local_len, shift);
     }
     assert(global_v->n >= local_len + shift);
     vector<T>* local_v = NULL;
     if (global_v->on_the_device) {
-        Vectorinit_CNT
-            local_v
-            = Vector::init<T>(local_len, true, true);
-
-        cudaError_t err;
-        err = cudaMemcpy(local_v->val, &(global_v->val[shift]), local_len * sizeof(T), cudaMemcpyDeviceToDevice);
+        local_v = Vector::init<T>(local_len, true, true);
+        cudaError_t err = cudaMemcpy(local_v->val, &(global_v->val[shift]), local_len * sizeof(T), cudaMemcpyDeviceToDevice);
         CHECK_DEVICE(err);
     } else {
         local_v = Vector::init<T>(local_len, true, false);
@@ -188,7 +161,6 @@ vector<T>* localize_global_vector(vector<T>* global_v, int local_len, int shift)
 template <typename T>
 vector<T>* copyToDevice(vector<T>* v)
 {
-
     assert(!v->on_the_device);
 
     int n = v->n;
@@ -215,13 +187,17 @@ __global__ void _copy_kernel(itype n, T* dest, T* source)
 }
 
 template <typename T>
-void copyTo(vector<T>* dest, vector<T>* source)
+void copyTo(vector<T>* dest, vector<T>* source, cudaStream_t stream)
 {
 
     int n = dest->n < source->n ? dest->n : source->n; /* Massimo Mach 16 2024 for debugging */
 
     GridBlock gb = gb1d(n, BLOCKSIZE);
-    _copy_kernel<<<gb.g, gb.b>>>(n, dest->val, source->val);
+    if (stream == 0) {
+        _copy_kernel<<<gb.g, gb.b>>>(n, dest->val, source->val);
+    } else {
+        _copy_kernel<<<gb.g, gb.b, 0, stream>>>(n, dest->val, source->val);
+    }
 }
 
 template <typename T>
@@ -254,30 +230,28 @@ vector<T>* copyToHost(vector<T>* v_d)
 template <typename T>
 void free(vector<T>* v)
 {
-    if (v->on_the_device) {
-        cudaError_t err;
-        err = cudaFree(v->val);
-        CHECK_DEVICE(err);
-    } else {
-        assert(v->val);
-        std::free(v->val);
+    if (v) {
+        if (v->on_the_device) {
+            CUDA_FREE(v->val);
+        } else {
+            assert(v->val);
+            FREE(v->val);
+        }
+        FREE(v);
     }
-    std::free(v);
 }
+template void free(vector<gstype>* v);
 
 template <typename T>
 void freeAsync(vector<T>* v, cudaStream_t stream)
 {
     if (v->on_the_device) {
-        cudaError_t err;
-        // err = cudaFree(v->val);
-        err = cudaFreeAsync(v->val, stream);
-        CHECK_DEVICE(err);
+        CUDA_FREE_ASYNC_STREAM(v->val, stream);
     } else {
         assert(v->val > 0);
-        std::free(v->val);
+        FREE(v->val);
     }
-    std::free(v);
+    FREE(v);
 }
 
 template <typename T>
@@ -453,9 +427,7 @@ vector<T>* elementwise_div(vector<T>* a, vector<T>* b, vector<T>* c)
     assert(a->n == b->n);
 
     if (c == NULL) {
-        Vectorinit_CNT
-            c
-            = Vector::init<T>(a->n, true, true);
+        c = Vector::init<T>(a->n, true, true);
     }
 
     GridBlock gb = gb1d(a->n, BLOCKSIZE);
@@ -464,41 +436,49 @@ vector<T>* elementwise_div(vector<T>* a, vector<T>* b, vector<T>* c)
     return c;
 }
 
+#define USE_CUSTOM_DDOT 0
 template <typename T>
 T dot(cublasHandle_t handle, vector<T>* a, vector<T>* b, int stride_a, int stride_b)
 {
-    PUSH_RANGE(__func__, 4)
+    BEGIN_PROF(__FUNCTION__);
 
     assert(a->on_the_device == b->on_the_device);
-
     T result;
+
+#if USE_CUSTOM_DDOT
+    assert(stride_a == 1);
+    assert(stride_b == 1);
+    assert(a->n == b->n);
+    assert(sizeof(T) == sizeof(double));
+    T* d_result = NULL;
+    CHECK_DEVICE(cudaMalloc(&d_result, sizeof(T)));
+    myddot(a->n, a->val, b->val, d_result);
+    CHECK_DEVICE(cudaMemcpy(&result, d_result, sizeof(T), cudaMemcpyDeviceToHost));
+    CUDA_FREE(d_result);
+#else
     cublasStatus_t cublas_state;
     cublas_state = cublasDdot(handle, a->n, a->val, stride_a, b->val, stride_b, &result);
     CHECK_CUBLAS(cublas_state);
+#endif
 
-    POP_RANGE
+    END_PROF(__FUNCTION__);
     return result;
 }
 
 template <typename T>
 void axpy(cublasHandle_t handle, vector<T>* x, vector<T>* y, T alpha, int inc)
 {
-    PUSH_RANGE(__func__, 4)
-
     assert(x->on_the_device == y->on_the_device);
     assert(x->n == y->n);
 
     cublasStatus_t cublas_state;
     cublas_state = cublasDaxpy(handle, x->n, &alpha, x->val, inc, y->val, inc);
     CHECK_CUBLAS(cublas_state);
-
-    POP_RANGE
 }
 
 template <typename T>
 void axpyWithOff(cublasHandle_t handle, vector<T>* x, vector<T>* y, T alpha, itype n, itype off)
 {
-
     assert(x->on_the_device == y->on_the_device);
     assert(x->n == y->n);
     int inc = 1;
@@ -511,13 +491,14 @@ void axpyWithOff(cublasHandle_t handle, vector<T>* x, vector<T>* y, T alpha, ity
 template <typename T>
 T norm_MPI(cublasHandle_t handle, vector<T>* a)
 {
-    PUSH_RANGE(__func__, 4)
+    BEGIN_PROF(__FUNCTION__);
 
     _MPI_ENV;
     assert(a->on_the_device);
 
     double result_local = dot(handle, a, a);
     double result = 0.;
+    BEGIN_PROF("MPI_Allreduce");
     CHECK_MPI(
         MPI_Allreduce(
             &result_local,
@@ -526,10 +507,11 @@ T norm_MPI(cublasHandle_t handle, vector<T>* a)
             MPI_DOUBLE,
             MPI_SUM,
             MPI_COMM_WORLD));
+    END_PROF("MPI_Allreduce");
 
     result = sqrt(result);
 
-    POP_RANGE
+    END_PROF(__FUNCTION__);
     return result;
 }
 
@@ -585,32 +567,25 @@ namespace Collection {
     template <typename T>
     vectorCollection<T>* init(unsigned int n)
     {
-        vectorCollection<T>* c = NULL;
-        c = (vectorCollection<T>*)Malloc(sizeof(vectorCollection<T>));
-        CHECK_HOST(c);
-
+        vectorCollection<T>* c = MALLOC(vectorCollection<T>, 1, true);
         c->n = n;
-        c->val = (vector<T>**)Malloc(n * sizeof(vector<T>*));
-        CHECK_HOST(c->val);
-        for (int i = 0; i < c->n; i++) {
-            c->val[i] = NULL;
-        }
-
+        c->val = MALLOC(vector<T>*, n, true);
         return c;
     }
 
     template <typename T>
     void free(vectorCollection<T>* c)
     {
-
-        for (int i = 0; i < c->n; i++) {
-            if (c->val[i] != NULL) {
-                Vector::free(c->val[i]);
+        if (c) {
+            for (int i = 0; i < c->n; i++) {
+                if (c->val[i] != NULL) {
+                    Vector::free(c->val[i]);
+                }
             }
-        }
 
-        std::free(c->val);
-        std::free(c);
+            FREE(c->val);
+            FREE(c);
+        }
     }
 }
 }
@@ -637,8 +612,8 @@ template vector<itype>* copyToDevice<itype>(vector<itype>*);
 template vector<gstype>* copyToDevice<gstype>(vector<gstype>*);
 template vector<vtype>* copyToDevice<vtype>(vector<vtype>*);
 
-template void copyTo<itype>(vector<itype>*, vector<itype>*);
-template void copyTo<vtype>(vector<vtype>*, vector<vtype>*);
+template void copyTo<itype>(vector<itype>*, vector<itype>*, cudaStream_t stream);
+template void copyTo<vtype>(vector<vtype>*, vector<vtype>*, cudaStream_t stream);
 template void copyToWithOff<vtype>(vector<vtype>*, vector<vtype>*, itype, itype);
 
 template vector<itype>* copyToHost<itype>(vector<itype>*);

@@ -1,7 +1,7 @@
 #include "suitor.h"
 
 #include "op/spspmpi.h"
-#include "utility/function_cnt.h" // PICO
+#include "utility/memory.h"
 #include "utility/utils.h"
 
 #include <cuda.h>
@@ -19,9 +19,7 @@
 #define CHUNK_PER_WARP 16
 #define WARP_SIZE 32
 #define _mask 0xFFFFFFFF
-#if 0
-__device__ cuda::binary_semaphore<cuda::thread_scope_device> s(1);
-#endif
+
 /*
  *  Method to lock a memory location
  */
@@ -59,8 +57,7 @@ __device__ void set_suitor(int candidate, double heaviest, int current_vid, int*
     if (heaviest > 0 && candidate >= 0) {
         int next_vertex = -1;
         *finished = _FALSE; /* case when you don't get lock */
-        *new_vertex_to_care = current_vid;
-        
+        *new_vertex_to_care = current_vid;;
         lock_vertex(d_locks, candidate);
         if (heaviest >= ws_[candidate]) { // test whether "heaviest" is still larger than previous offer to "candidate"
             next_vertex = s_[candidate]; // save previous suitor of "candidate" as it is un-lodged by "current_vid"
@@ -82,7 +79,6 @@ __device__ void set_suitor(int candidate, double heaviest, int current_vid, int*
 
 __device__ void find_Candidate(int W_OFF, int len_neighborlist, int* edge_list, volatile double* ws_, volatile int* s_, double* weight_list, volatile int* d_locks, int current_vid, int* potential_candidate, double* by_weight, int shift, int n)
 {
-
     int y;
     double weight_value;
     double ws_value;
@@ -121,8 +117,6 @@ __device__ void find_Candidate(int W_OFF, int len_neighborlist, int* edge_list, 
             }
             unlock_vertex(d_locks, y);
             successful += 1;
-            //                }
-            //            }
             if (successful == 2) {
                 continue;
             }
@@ -308,7 +302,6 @@ __global__ void _fix_shift_matching(int n, int* M, int shift)
 
 vector<int>* approx_match_gpu_suitor(handles* h, CSR* A, CSR* W, vector<itype>* M, vector<double>* ws, vector<int>* mutex)
 {
-
     _MPI_ENV;
     assert(W->on_the_device);
     int n = W->n;
@@ -319,43 +312,24 @@ vector<int>* approx_match_gpu_suitor(handles* h, CSR* A, CSR* W, vector<itype>* 
     Vector::fillWithValue(ws, 0.0);
     Vector::fillWithValue(mutex, 0);
 
-    //
     int load_per_blk = CHUNK_PER_WARP * (NTHREAD_PER_BLK / WARP_SIZE); // NTHREAD_PER_BLK is multiple of 32
 
     int nr_of_block = (n + load_per_blk - 1) / load_per_blk;
 
     int shared_memory_size_per_block = (CHUNK_PER_WARP + 1) * (NTHREAD_PER_BLK / WARP_SIZE) * sizeof(int);
     // get dev_bit col to pass to compute_rows. This is sync
-    if (0) {
-        fprintf(stderr, "Task %d reached line %d in suitor (%s)\n", myid, __LINE__, __FILE__);
-    }
 
     kernel_for_matching<<<nr_of_block, NTHREAD_PER_BLK, shared_memory_size_per_block>>>(n, W->row, M->val, ws->val, W->col, W->val, mutex->val, 0 /* W->row_shift */);
 
     compute_rows_to_rcv_CPU(A, NULL, _bitcol);
-    if (0) {
-        fprintf(stderr, "Task %d reached line %d in suitor (%s)\n", myid, __LINE__, __FILE__);
-    }
     Vector::free(_bitcol);
 
     cudaDeviceSynchronize();
-    if (0) {
-        fprintf(stderr, "Task %d reached line %d in suitor (%s)\n", myid, __LINE__, __FILE__);
-    }
     return M;
-}
-
-template <typename T>
-T* makeArray(int size)
-{
-    T* a = (T*)Malloc(sizeof(T) * size);
-    assert(a != NULL);
-    return a;
 }
 
 vector<int>* approx_match_gpu_suitor_v0(CSR* W, vector<itype>* M, vector<double>* ws, vector<int>* mutex)
 {
-
     assert(W->on_the_device);
     int n = W->n;
 
@@ -386,7 +360,6 @@ vector<int>* approx_match_gpu_suitor_v0(CSR* W, vector<itype>* M, vector<double>
 template <typename T>
 vector<int>* approx_match_cpu_suitor(CSR* W_)
 {
-
     CSR* W = CSRm::copyToHost(W_);
     int* row = W->row;
     int* col = W->col;
@@ -396,10 +369,7 @@ vector<int>* approx_match_cpu_suitor(CSR* W_)
     // prepare
     vector<int>* suitor = Vector::init<int>(n, true, false);
 
-    T* ws = makeArray<T>(n);
-
-    std::cout << "its me\n";
-
+    T* ws = MALLOC(T, n);
     for (int i = 0; i < n; i++) {
         suitor->val[i] = -1;
         ws[i] = -1;
@@ -435,11 +405,11 @@ vector<int>* approx_match_cpu_suitor(CSR* W_)
             }
         }
     }
-    free(ws);
+    FREE(ws);
 
     CSRm::free(W);
 
-    VectorcopyToDevice_CNT return Vector::copyToDevice(suitor);
+    return Vector::copyToDevice(suitor);
 }
 
 template <typename T>
@@ -456,8 +426,7 @@ vector<int>* approx_match_cpu_suitor_LOCAL(CSR* W_)
     // prepare
     vector<int>* suitor = Vector::init<int>(n, true, false);
 
-    T* ws = makeArray<T>(n);
-
+    T* ws = MALLOC(T, n);
     for (int i = 0; i < n; i++) {
         suitor->val[i] = -1;
         ws[i] = -1.;
@@ -502,7 +471,7 @@ vector<int>* approx_match_cpu_suitor_LOCAL(CSR* W_)
             }
         }
     }
-    free(ws);
+    FREE(ws);
     CSRm::free(W);
-    VectorcopyToDevice_CNT return Vector::copyToDevice(suitor);
+    return Vector::copyToDevice(suitor);
 }

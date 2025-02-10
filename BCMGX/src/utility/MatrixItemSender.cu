@@ -25,7 +25,7 @@ matrixItem_t MatrixItemSender::mapItemForProcess(matrixItem_t item, int proc)
 std::string MatrixItemSender::toString(matrixItem_t item)
 {
     char str[1024] = { 0 };
-    snprintf(str, sizeof(str), "(%d, %d)=%lf",
+    snprintf(str, sizeof(str), "(%ld, %ld)=%lf",
         item.row,
         item.col,
         item.val);

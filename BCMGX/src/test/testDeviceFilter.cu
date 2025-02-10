@@ -1,5 +1,6 @@
 #include "utility/arrays.h"
 #include "utility/deviceFilter.h"
+#include "utility/memory.h"
 
 int main(int argc, char** argv)
 {
@@ -16,8 +17,8 @@ int main(int argc, char** argv)
     debugArray("dArrFiltered[%d] = %d\n", dArrFiltered, lenFiltered, true, stderr);
     fprintf(stderr, "lenFiltered: %d\n", lenFiltered);
 
-    cudaFree(dArr);
-    cudaFree(dArrFiltered);
+    CUDA_FREE(dArr);
+    CUDA_FREE(dArrFiltered);
 
     return 0;
 }

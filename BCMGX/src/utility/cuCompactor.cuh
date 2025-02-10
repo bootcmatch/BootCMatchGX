@@ -1,9 +1,13 @@
 
-/*
- * cuCompactor.h
- *
- *  Created on: 21/mag/2015
- *      Author: knotman
+/**
+ * @file cuCompactor.h
+ * @brief This header defines a CUDA-based compaction operation (cuCompactor).
+ * 
+ * It processes an input array, compacting it by removing unwanted elements based on a predicate function.
+ * The algorithm is optimized using warp-level synchronization and memory management techniques to maximize performance.
+ * 
+ * @date Created on: 21/mag/2015
+ * @author knotman
  */
 
 #ifndef CUCOMPACTOR_H_
@@ -15,21 +19,54 @@
 #include <thrust/unique.h>
 #include "cuda_error_check.h"
 
-#include "utility/function_cnt.h"
 #include "utility/setting.h"
 #include "utility/cudamacro.h"
+#include "utility/memory.h"
 
 #define WARPSIZE (32)
-// #define FULL_MASK 0xffffffff
 
+/**
+ * @brief Divides two integers and rounds up to the nearest integer.
+ * 
+ * Computes the ceiling of the division result: `x / y`, i.e., it calculates the smallest integer greater than or
+ * equal to the division of x by y.
+ * 
+ * @param x The numerator.
+ * @param y The denominator.
+ * @return The ceiling of the division result.
+ */
 __host__ __device__ __inline__ int divup(int x, int y) { return x / y + (x % y ? 1 : 0); }
 
+/**
+ * @brief Computes 2 raised to the power of `e`.
+ * 
+ * This is done by bit-shifting the value `1` to the left by `e` positions (equivalent to 2^e).
+ * 
+ * @param e The exponent.
+ * @return 2 raised to the power of e.
+ */
 __device__ __inline__ int pow2i (int e) {
 	return 1<<e;
 }
 
 namespace cuCompactor {
 
+/**
+ * @brief Kernel to count the number of valid elements in each thread block based on a predicate.
+ * 
+ * This kernel computes the number of valid elements in each block by applying a predicate function. Each thread in a
+ * block checks if its corresponding element satisfies the condition defined in the predicate and counts the valid ones.
+ * The total number of valid elements in each block is stored in `d_BlockCounts`.
+ * 
+ * @tparam T The type of elements in the input array.
+ * @tparam Predicate The type of the predicate function.
+ * @param d_input Input device array.
+ * @param length The length of the input array.
+ * @param d_BlockCounts Output device array to store the count of valid elements in each block.
+ * @param predicate The predicate function used to check each element.
+ * @param f Lower bound parameter for the predicate.
+ * @param l Upper bound parameter for the predicate.
+ */
 template <typename T,typename Predicate>
 __global__ void computeBlockCounts(T* d_input,int length,int*d_BlockCounts,Predicate predicate,int f, int l){
 	int idx = threadIdx.x + blockIdx.x*blockDim.x;
@@ -43,6 +80,23 @@ __global__ void computeBlockCounts(T* d_input,int length,int*d_BlockCounts,Predi
 	}
 }
 
+/**
+ * @brief Kernel to compact the input array based on the predicate function.
+ * 
+ * This kernel compacts the input array by moving the valid elements (those that satisfy the predicate) to the
+ * correct positions in the output array. It uses warp-level synchronization and exclusive prefix sum techniques to
+ * efficiently determine the output offset for each element.
+ * 
+ * @tparam T The type of elements in the input array.
+ * @tparam Predicate The type of the predicate function.
+ * @param d_input Input device array.
+ * @param length The length of the input array.
+ * @param d_output Output device array to store the compacted elements.
+ * @param d_BlocksOffset Device array to store the offsets for each block.
+ * @param predicate The predicate function used to check each element.
+ * @param f Lower bound parameter for the predicate.
+ * @param l Upper bound parameter for the predicate.
+ */
 template <typename T,typename Predicate>
 __global__ void compactK(T* d_input,int length, T* d_output,int* d_BlocksOffset,Predicate predicate, int f, int l){
 	int idx = threadIdx.x + blockIdx.x*blockDim.x;
@@ -98,6 +152,17 @@ __global__ void compactK(T* d_input,int length, T* d_output,int* d_BlocksOffset,
 	}
 }
 
+/**
+ * @brief Kernel to print the contents of an array in the GPU for debugging.
+ * 
+ * This kernel prints the contents of the input array to the console in a formatted manner. It is useful for debugging
+ * and visualizing the array content.
+ * 
+ * @tparam T The type of elements in the array.
+ * @param hd_data The input device array.
+ * @param size The size of the array.
+ * @param newline The number of elements to print per line.
+ */
 template <class T>
 __global__  void printArray_GPU(T* hd_data, int size,int newline){
 	int w=0;
@@ -111,20 +176,36 @@ __global__  void printArray_GPU(T* hd_data, int size,int newline){
 	printf("\n");
 }
 
+/**
+ * @brief Performs the compaction of an input array by removing unwanted elements based on the predicate.
+ * 
+ * This function coordinates the execution of the CUDA kernels to perform the compaction. It first computes the number
+ * of valid elements per block, then computes the prefix sum of valid block counts, and finally performs the actual
+ * compaction by moving the valid elements to the output array.
+ * 
+ * @tparam T The type of elements in the input array.
+ * @tparam Predicate The type of the predicate function.
+ * @param d_input The input device array.
+ * @param d_output The output device array to store the compacted elements.
+ * @param length The length of the input array.
+ * @param predicate The predicate function to check the validity of each element.
+ * @param blockSize The number of threads per block for kernel execution.
+ * @param f Lower bound parameter for the predicate.
+ * @param l Upper bound parameter for the predicate.
+ * @return The number of valid (compacted) elements.
+ */
 template <typename T,typename Predicate>
 int compact(T* d_input, T* d_output,int length, Predicate predicate, int blockSize, int f, int l){
 	static int stat_numBlocks = 0;
     int numBlocks = divup(length,blockSize);
     if (numBlocks > stat_numBlocks) {
-        if (stat_numBlocks > 0) {
-            cudaFree(glob_d_BlocksCount);
-            cudaFree(glob_d_BlocksOffset);
-        }
+        //if (stat_numBlocks > 0) {
+            CUDA_FREE(glob_d_BlocksCount);
+            CUDA_FREE(glob_d_BlocksOffset);
+        //}
         stat_numBlocks = numBlocks;
-        cudaMalloc_CNT
-        CUDASAFECALL (cudaMalloc(&glob_d_BlocksCount,sizeof(int)*stat_numBlocks));
-        cudaMalloc_CNT
-        CUDASAFECALL (cudaMalloc(&glob_d_BlocksOffset,sizeof(int)*stat_numBlocks));
+        glob_d_BlocksCount = CUDA_MALLOC(int, stat_numBlocks);
+        glob_d_BlocksOffset = CUDA_MALLOC(int, stat_numBlocks);
     }
 	thrust::device_ptr<int> thrustPrt_bCount(glob_d_BlocksCount);
 	thrust::device_ptr<int> thrustPrt_bOffset(glob_d_BlocksOffset);
@@ -141,8 +222,8 @@ int compact(T* d_input, T* d_output,int length, Predicate predicate, int blockSi
 	// determine number of elements in the compacted list
 	int compact_length = thrustPrt_bOffset[numBlocks-1] + thrustPrt_bCount[numBlocks-1];
 
-// 	cudaFree(d_BlocksCount);
-// 	cudaFree(d_BlocksOffset);
+// 	CUDA_FREE(d_BlocksCount);
+// 	CUDA_FREE(d_BlocksOffset);
 
 	return compact_length;
 }

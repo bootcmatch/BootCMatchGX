@@ -14,6 +14,7 @@
 #include "utility/distribuite.h"
 #include "utility/globals.h"
 #include "utility/handles.h"
+#include "utility/memory.h"
 #include "utility/mpi.h"
 
 using namespace std;
@@ -248,12 +249,12 @@ int main(int argc, char** argv)
     }
 
     // Release memory
-    CudaFree(d_concatenated);
-    CudaFree(d_nnzItems);
+    CUDA_FREE(d_concatenated);
+    CUDA_FREE(d_nnzItems);
 
     CSRm::free(dlA);
-    Free(h_missingItems);
-    CudaFree(d_missingItems);
+    FREE(h_missingItems);
+    CUDA_FREE(d_missingItems);
 
     if (f) {
         fflush(f);

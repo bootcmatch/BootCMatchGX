@@ -1,3 +1,12 @@
+/**
+ * @file AbstractSender.h
+ * @brief Defines the AbstractSender class for distributing items across MPI processes.
+ *
+ * This file contains the definition of the AbstractSender class, which is responsible
+ * for sending data items to different MPI processes based on a user-defined mapping.
+ *
+ * @tparam T Type of data being sent between processes.
+ */
 #pragma once
 
 #include "utility/MpiBuffer.h"
@@ -5,14 +14,29 @@
 #include "utility/arrays.h"
 #include <string>
 
+/**
+ * @class AbstractSender
+ * @brief A template class for distributing data items across MPI processes.
+ *
+ * The AbstractSender class manages the assignment and communication of data items
+ * between MPI processes. It determines which process should receive each item,
+ * prepares the data buffers, and performs MPI communication.
+ *
+ * @tparam T The data type of the items being sent.
+ */
 template <typename T>
 class AbstractSender {
 protected:
-    bool use_row_shift;
-    FILE* debug;
-    MPI_Datatype mpi_data_type;
+    bool use_row_shift;      ///< Flag indicating whether row shifting is enabled.
+    FILE* debug;             ///< Debug file pointer for logging information.
+    MPI_Datatype mpi_data_type; ///< MPI datatype corresponding to T.
 
 public:
+/**
+     * @brief Constructor for AbstractSender.
+     * @param debug Pointer to a debug file for logging.
+     * @param mpi_data_type MPI datatype corresponding to T.
+     */
     AbstractSender(FILE* debug, MPI_Datatype mpi_data_type)
         : use_row_shift(false)
         , debug(debug)
@@ -20,21 +44,62 @@ public:
     {
     }
 
+    /**
+     * @brief Determines which process should receive a given item.
+     * @param index The index of the item in the dataset.
+     * @param item The item being processed.
+     * @return The process ID to which the item should be sent.
+     */
     virtual int getProcessForItem(int index, T item) = 0;
 
+    /**
+     * @brief Maps an item to the format required for a specific process.
+     * @param item The original item.
+     * @param proc The destination process.
+     * @return The transformed item for the destination process.
+     */
     virtual T mapItemForProcess(T item, int proc)
     {
         return item;
     }
 
+    /**
+     * @brief Converts an item to a string representation for debugging.
+     * @param item The item to be converted.
+     * @return String representation of the item.
+     */
     virtual std::string toString(T item) = 0;
+
+    /**
+     * @brief Logs debugging information about an array of items.
+     * @param title Title of the debug output.
+     * @param arr Pointer to the array of items.
+     * @param len Length of the array.
+     * @param isOnDevice Flag indicating whether the data is on a device.
+     */
     virtual void debugItems(const char* title, T* arr, size_t len, bool isOnDevice) = 0;
 
+    /**
+     * @brief Sets whether row shifting should be used.
+     * @param use_row_shift Boolean flag indicating row shift usage.
+     */
     void setUseRowShift(bool use_row_shift)
     {
         this->use_row_shift = use_row_shift;
     }
 
+    /**
+     * @brief Distributes items across MPI processes.
+     *
+     * This function determines the destination process for each item, organizes
+     * the send and receive buffers, and performs MPI communication to exchange
+     * data between processes.
+     *
+     * @param items Pointer to the array of items to be sent.
+     * @param size Number of items in the array.
+     * @param sendBuffer Buffer for storing items to be sent.
+     * @param rcvBuffer Buffer for storing received items.
+     */
     void send(T* items, size_t size,
         MpiBuffer<T>* sendBuffer, MpiBuffer<T>* rcvBuffer)
     {

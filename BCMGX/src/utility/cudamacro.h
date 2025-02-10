@@ -1,7 +1,22 @@
+/**
+ * @file
+ */
+ 
 #pragma once
 
 #include "setting.h"
 
+/**
+ * @brief Macro to check the result of a CUDA API call.
+ * 
+ * This macro is used to check the result of a CUDA API call. If the call results in an error (i.e., not `cudaSuccess`), 
+ * the macro prints an error message to `stderr` with details of the file, line number, and the error string, and then 
+ * exits the program with a failure status.
+ * 
+ * This is a convenient tool for handling errors in CUDA code, allowing for easier debugging and faster identification of issues.
+ * 
+ * @param call The CUDA API call to check for errors.
+ */
 #define MY_CUDA_CHECK(call)                                               \
     {                                                                     \
         cudaError err = call;                                             \
@@ -12,6 +27,16 @@
         }                                                                 \
     }
 
+/**
+ * @brief Macro to check the last CUDA error with a custom error message.
+ * 
+ * This macro checks the last CUDA error using `cudaGetLastError()`. If the last CUDA error is not `cudaSuccess`, 
+ * it prints a custom error message to `stderr` with details of the file, line number, the error string, and other 
+ * relevant information such as the number of threads, blocks, and other provided parameters. It then exits the program 
+ * with a failure status.
+ * 
+ * @param errorMessage The custom error message to be printed if an error is encountered.
+ */
 #define MY_CHECK_ERROR(errorMessage)                                                                                    \
     {                                                                                                                   \
         cudaError_t err = cudaGetLastError();                                                                           \
@@ -22,6 +47,15 @@
         }                                                                                                               \
     }
 
+/**
+ * @brief Macro to check the result of a cuBLAS API call.
+ * 
+ * This macro checks the result of a cuBLAS API call. If the call does not return `CUBLAS_STATUS_SUCCESS`, 
+ * it prints an error message to `stderr` with the file, line number, and the cuBLAS error code, then exits 
+ * the program with a failure status.
+ * 
+ * @param call The cuBLAS API call to check for errors.
+ */
 #define MY_CUBLAS_CHECK(call)                                               \
     {                                                                       \
         cublasStatus_t err = call;                                          \
@@ -31,34 +65,6 @@
             exit(EXIT_FAILURE);                                             \
         }                                                                   \
     }
-
-#if defined(USE_NVTX)
-#include <nvToolsExt.h>
-
-#if !defined(INITIALIZED_NVTX)
-#define INITIALIZED_NVTX
-const uint32_t colors[] = { 0xff00ff00, 0xff0000ff, 0xffffff00, 0xffff00ff, 0xff00ffff, 0xffff0000, 0xffffffff };
-const int num_colors = sizeof(colors) / sizeof(uint32_t);
-#endif
-
-#define PUSH_RANGE(name, cid)                              \
-    {                                                      \
-        int color_id = cid;                                \
-        color_id = color_id % num_colors;                  \
-        nvtxEventAttributes_t eventAttrib = { 0 };         \
-        eventAttrib.version = NVTX_VERSION;                \
-        eventAttrib.size = NVTX_EVENT_ATTRIB_STRUCT_SIZE;  \
-        eventAttrib.colorType = NVTX_COLOR_ARGB;           \
-        eventAttrib.color = colors[color_id];              \
-        eventAttrib.messageType = NVTX_MESSAGE_TYPE_ASCII; \
-        eventAttrib.message.ascii = name;                  \
-        nvtxRangePushEx(&eventAttrib);                     \
-    }
-#define POP_RANGE nvtxRangePop();
-#else
-#define PUSH_RANGE(name, cid)
-#define POP_RANGE
-#endif
 
 extern itype* iPtemp1;
 extern vtype* vPtemp1;

@@ -1,6 +1,10 @@
+/**
+ * @file
+ */
 #pragma once
 
 #include <stdio.h>
+#include <string>
 
 // #define DEFAULTSCALENNZMISS 1024
 extern int xsize;
@@ -10,6 +14,9 @@ extern int* itaskmap;
 extern int scalennzmiss;
 extern char idstring[128];
 extern FILE* log_file;
+extern std::string output_dir;
+extern std::string output_prefix;
+extern std::string output_suffix;
 
 void close_log_file();
 void open_log_file(int myid, const char* log_filename);
@@ -27,6 +34,6 @@ void open_log_file(int myid, const char* log_filename);
 #endif
 
 namespace BCM {
-void init(int argc, char **argv);
+void init(int argc, char** argv);
 void shutdown();
 };

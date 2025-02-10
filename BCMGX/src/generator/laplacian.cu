@@ -3,6 +3,7 @@
 #include "datastruct/CSR.h"
 #include "utility/cudamacro.h"
 #include "utility/globals.h"
+#include "utility/memory.h"
 #include "utility/mpi.h"
 #include "utility/setting.h"
 #include "utility/utils.h"
@@ -105,16 +106,8 @@ CSR* generateLocalLaplacian3D(itype n)
             NNZ++;
         }
     }
-    taskmap = (int*)Malloc(nprocs * sizeof(*taskmap));
-    itaskmap = (int*)Malloc(nprocs * sizeof(*itaskmap));
-    if (taskmap == NULL) {
-        fprintf(stderr, "Could not get %d byte for taskmap\n", nprocs * sizeof(*taskmap));
-        exit(1);
-    }
-    if (itaskmap == NULL) {
-        fprintf(stderr, "Could not get %d byte for itaskmap\n", nprocs * sizeof(*itaskmap));
-        exit(1);
-    }
+    taskmap = MALLOC(int, nprocs);
+    itaskmap = MALLOC(int, nprocs);
     for (int i = 0; i < nprocs; i++) {
         taskmap[i] = i;
         itaskmap[i] = i;
@@ -125,8 +118,6 @@ CSR* generateLocalLaplacian3D(itype n)
 
 CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q, itype R)
 {
-    PUSH_RANGE(__func__, 2)
-
     itype local_size = nx * ny * nz;
 
     gstype gnx = (gstype)nx * (gstype)P; // Boundary on x side
@@ -180,17 +171,8 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
 
     int allcoords[3 * P * Q * R] = { 0 };
 
-    taskmap = (int*)Malloc(nprocs * sizeof(*taskmap));
-    if (taskmap == NULL) {
-        fprintf(stderr, "Could not get %d byte for taskmap\n", nprocs * sizeof(*taskmap));
-        exit(1);
-    }
-
-    itaskmap = (int*)Malloc(nprocs * sizeof(*itaskmap));
-    if (itaskmap == NULL) {
-        fprintf(stderr, "Could not get %d byte for itaskmap\n", nprocs * sizeof(*itaskmap));
-        exit(1);
-    }
+    taskmap = MALLOC(int, nprocs);
+    itaskmap = MALLOC(int, nprocs);
 
     CHECK_MPI(MPI_Allgather(
         coords,
@@ -206,6 +188,12 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
         itaskmap[i] = (allcoords[i * 3 + 2] * Q * P) + (allcoords[i * 3 + 1] * P) + (allcoords[i * 3]);
     }
 
+    // if(myid==0) {
+    //   for(int i=0; i<nprocs; i++) {
+    // 	   printf("taskmap[%d]=%d, itaskmap[%d]=%d\n",i,taskmap[i],i,itaskmap[i]);
+    //   }
+    // }
+
     // ---------------------------------------------------------------------------
 
     CSR* Alocal = CSRm::init(
@@ -219,9 +207,9 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
         ilower);
 
     // alloc COO
-    itype* Arow = (itype*)Malloc(sizeof(itype*) * (local_size * 7));
-    itype* Acol = (itype*)Malloc(sizeof(itype*) * (local_size * 7));
-    vtype* Aval = (vtype*)Malloc(sizeof(vtype*) * (local_size * 7));
+    itype* Arow = MALLOC(itype, local_size * 7, true);
+    itype* Acol = MALLOC(itype, local_size * 7, true);
+    vtype* Aval = MALLOC(vtype, local_size * 7, true);
 
     itype count = 0;
     itype nz_count = 0;
@@ -338,18 +326,15 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
     fclose(fout);
 #endif
 
-    Free(Arow);
-    Free(Acol);
-    Free(Aval);
+    FREE(Arow);
+    FREE(Acol);
+    FREE(Aval);
 
-    POP_RANGE
     return Alocal;
 }
 
 CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q, itype R)
 {
-    PUSH_RANGE(__func__, 2)
-
     itype local_size = nx * ny * nz;
 
     gstype gnx = (gstype)nx * (gstype)P; // Boundary on x side
@@ -403,17 +388,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
 
     int allcoords[3 * P * Q * R] = { 0 };
 
-    taskmap = (int*)Malloc(nprocs * sizeof(*taskmap));
-    if (taskmap == NULL) {
-        fprintf(stderr, "Could not get %d byte for taskmap\n", nprocs * sizeof(*taskmap));
-        exit(1);
-    }
-
-    itaskmap = (int*)Malloc(nprocs * sizeof(*itaskmap));
-    if (itaskmap == NULL) {
-        fprintf(stderr, "Could not get %d byte for itaskmap\n", nprocs * sizeof(*itaskmap));
-        exit(1);
-    }
+    taskmap = MALLOC(int, nprocs);
+    itaskmap = MALLOC(int, nprocs);
 
     CHECK_MPI(MPI_Allgather(
         coords,
@@ -429,6 +405,12 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
         itaskmap[i] = (allcoords[i * 3 + 2] * Q * P) + (allcoords[i * 3 + 1] * P) + (allcoords[i * 3]);
     }
 
+    // if(myid==0) {
+    //   for(int i=0; i<nprocs; i++) {
+    // 	   printf("taskmap[%d]=%d, itaskmap[%d]=%d\n",i,taskmap[i],i,itaskmap[i]);
+    //   }
+    // }
+
     // ---------------------------------------------------------------------------
 
     CSR* Alocal = CSRm::init(
@@ -442,9 +424,9 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
         ilower);
 
     // alloc COO
-    itype* Arow = (itype*)Malloc(sizeof(itype*) * (local_size * 27));
-    itype* Acol = (itype*)Malloc(sizeof(itype*) * (local_size * 27));
-    vtype* Aval = (vtype*)Malloc(sizeof(vtype*) * (local_size * 27));
+    itype* Arow = MALLOC(itype, local_size * 27, true);
+    itype* Acol = MALLOC(itype, local_size * 27, true);
+    vtype* Aval = MALLOC(vtype, local_size * 27, true);
 
     itype count = 0;
     itype nz_count = 0;
@@ -772,11 +754,220 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
     }
     Alocal->nnz = nz_count;
 
-    Free(Arow);
-    Free(Acol);
-    Free(Aval);
+#if defined(PRINT_COO3D)
+    FILE* fout = NULL;
+    char fname[256];
+    snprintf(fname, 256, "matrix-rank%d-pqr-%d-%d-%d.mtx", myid, p, q, r);
+    fout = fopen(fname, "w+");
+    if (fout == NULL) {
+        fprintf(stderr, "in function %s: error opening %s\n", __func__, fname);
+        exit(EXIT_FAILURE);
+    }
+    for (int i = 0; i < nz_count; i++) {
+        fprintf(fout, "%d %d %lf\n", Arow[i] + (ilower + 1), Acol[i] + ilower + 1, Aval[i]);
+    }
+    fclose(fout);
+#endif
 
-    POP_RANGE
+    FREE(Arow);
+    FREE(Acol);
+    FREE(Aval);
+
+    return Alocal;
+}
+
+CSR* generateLocalLaplacian3D_27p_old(itype nx, itype ny, itype nz, itype P, itype Q, itype R)
+{
+    itype local_size = nx * ny * nz;
+
+    gstype gnx = (gstype)nx * (gstype)P; // Boundary on x side
+    gstype gny = (gstype)ny * (gstype)Q; // Boundary on y side
+    gstype gnz = (gstype)nz * (gstype)R; // Boundary on z side
+
+    gstype num_rows = gnx * gny * gnz; // global number of rows
+    gstype num_nonzeros = num_rows * 27; // Ignoring any boundary, 27 nnz per row
+    gstype num_substract = 0;
+
+    num_substract += gny * gnz;
+    num_substract += gny * gnz;
+    num_substract += gnx * gnz;
+    num_substract += gnx * gnz;
+    num_substract += gnx * gny;
+    num_substract += gnx * gny;
+
+    num_nonzeros -= num_substract; // global
+
+    // ---------------------------------------------------------------------------
+
+    _MPI_ENV;
+    MPI_Comm NEWCOMM;
+
+    int dims[3] = { 0, 0, 0 };
+    int periods[3] = { false, false, false };
+    int coords[3] = { 0, 0, 0 };
+    int my3id;
+
+    dims[0] = P;
+    dims[1] = Q;
+    dims[2] = R;
+
+    MPI_Dims_create(nprocs, 3, dims);
+    MPI_Cart_create(MPI_COMM_WORLD, 3, dims, periods, false, &NEWCOMM);
+    MPI_Comm_rank(NEWCOMM, &my3id);
+    MPI_Cart_coords(NEWCOMM, my3id, 3, coords);
+
+    // ---------------------------------------------------------------------------
+
+    int p = coords[0];
+    int q = coords[1];
+    int r = coords[2];
+
+    gstype ilower = (((gstype)r) * ((gstype)Q) * ((gstype)P)
+                        + ((gstype)q) * ((gstype)P)
+                        + ((gstype)p))
+        * ((gstype)local_size);
+
+    // ---------------------------------------------------------------------------
+
+    int allcoords[3 * P * Q * R] = { 0 };
+
+    taskmap = MALLOC(int, nprocs);
+    itaskmap = MALLOC(int, nprocs);
+
+    CHECK_MPI(MPI_Allgather(
+        coords,
+        sizeof(coords),
+        MPI_BYTE,
+        allcoords,
+        sizeof(coords),
+        MPI_BYTE,
+        MPI_COMM_WORLD));
+
+    for (int i = 0; i < nprocs; i++) {
+        taskmap[(allcoords[i * 3 + 2] * Q * P) + (allcoords[i * 3 + 1] * P) + (allcoords[i * 3])] = i;
+        itaskmap[i] = (allcoords[i * 3 + 2] * Q * P) + (allcoords[i * 3 + 1] * P) + (allcoords[i * 3]);
+    }
+
+    // if(myid==0) {
+    //   for(int i=0; i<nprocs; i++) {
+    // 	   printf("taskmap[%d]=%d, itaskmap[%d]=%d\n",i,taskmap[i],i,itaskmap[i]);
+    //   }
+    // }
+
+    // ---------------------------------------------------------------------------
+
+    if (log_file) {
+        fprintf(log_file, "myid: %d\n", my3id);
+        fprintf(log_file, "num_rows: %ld\n", num_rows);
+        fprintf(log_file, "ilower: %ld\n", ilower);
+        fprintf(log_file, "local_size: %d\n", local_size);
+        fprintf(log_file, "p: %d, q: %d, r: %d\n", p, q, r);
+    }
+
+    CSR* Alocal = CSRm::init(
+        local_size, // rows
+        num_rows, // cols
+        (local_size * 27), // nnz
+        true, // allocate mem
+        false, // on device
+        false, // symetric
+        num_rows, // full_n
+        ilower // row_shift
+    );
+
+    // alloc COO
+    itype* Arow = MALLOC(itype, local_size * 27, true);
+    itype* Acol = MALLOC(itype, local_size * 27, true);
+    vtype* Aval = MALLOC(vtype, local_size * 27, true);
+
+    itype count = 0;
+    itype nz_count = 0;
+    itype nnz = 0;
+    Alocal->row[0] = 0;
+
+    // ---------------------------------------------------------------------------
+
+    for (int k = 0; k < nz; k++) {
+        int gk = r * nz + k;
+        for (int j = 0; j < ny; j++) {
+            int gj = q * ny + j;
+            for (int i = 0; i < nx; i++) {
+                int gi = p * nx + i;
+
+                // Current global row
+                gstype curgrow = gk * gny * gnx
+                    + gj * gnx
+                    + gi;
+
+                // Current local row
+                // gstype curlrow = k * nx * ny
+                //         + j * nx + i;
+
+                for (int sz = -1; sz <= 1; sz++) {
+                    if (gk + sz >= 0 && gk + sz < gnz) {
+                        for (int sy = -1; sy <= 1; sy++) {
+                            if (gj + sy >= 0 && gj + sy < gny) {
+                                for (int sx = -1; sx <= 1; sx++) {
+                                    if (gi + sx >= 0 && gi + sx < gnx) {
+                                        gstype curcol = curgrow
+                                            + sz * gnx * gny
+                                            + sy * gnx
+                                            + sx;
+
+                                        if (curcol == curgrow) {
+                                            Aval[nz_count] = 26.0;
+                                        } else {
+                                            Aval[nz_count] = -1.0;
+                                        }
+
+                                        Arow[nz_count] = count;
+                                        Acol[nz_count] = curcol - ilower;
+
+                                        nnz++;
+                                        nz_count++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Alocal->row[count + 1] = Alocal->row[count] + nnz;
+                bubbleSort(&Acol[nz_count - nnz], &Aval[nz_count - nnz], nnz);
+                nnz = 0;
+                count++;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+
+    Alocal->row[count] = nz_count; // check if
+    for (itype j = 0; j < nz_count; j++) {
+        Alocal->col[j] = Acol[j];
+        Alocal->val[j] = Aval[j];
+    }
+    Alocal->nnz = nz_count;
+
+#if defined(PRINT_COO3D)
+    FILE* fout = NULL;
+    char fname[256];
+    snprintf(fname, 256, "matrix-rank%d-pqr-%d-%d-%d.mtx", myid, p, q, r);
+    fout = fopen(fname, "w+");
+    if (fout == NULL) {
+        fprintf(stderr, "in function %s: error opening %s\n", __func__, fname);
+        exit(EXIT_FAILURE);
+    }
+    for (int i = 0; i < nz_count; i++) {
+        fprintf(fout, "%d %d %lf\n", Arow[i] + (ilower + 1), Acol[i] + ilower + 1, Aval[i]);
+    }
+    fclose(fout);
+#endif
+
+    FREE(Arow);
+    FREE(Acol);
+    FREE(Aval);
+
     return Alocal;
 }
 
@@ -785,7 +976,7 @@ int* read_laplacian_file(const char* file_name)
     char buffer[BUFSIZE];
     const char* params_list[] = { "nx", "ny", "nz", "P", "Q", "R" };
 
-    int* lap_3d_parm = (int*)Malloc(sizeof(int) * LAP_N_PARAMS);
+    int* lap_3d_parm = MALLOC(int, LAP_N_PARAMS, true);
     FILE* fp = fopen(file_name, "r");
     if (!fp) {
         fprintf(stderr, "[ERROR] - Laplacia file not found! (%s)\n", file_name);

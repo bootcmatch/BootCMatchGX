@@ -1,10 +1,10 @@
-#include "utility/cudamacro.h"
-#include "utility/mpi.h"
-#include <cuda_runtime.h>
-
 #include "datastruct/CSR.h"
 #include "datastruct/scalar.h"
-#include "utility/function_cnt.h" //PICO
+#include "utility/cudamacro.h"
+#include "utility/memory.h"
+#include "utility/mpi.h"
+
+#include <cuda_runtime.h>
 
 extern int *taskmap, *itaskmap;
 
@@ -27,7 +27,7 @@ __inline__ void chop_array_MPI(int nprocs, int n, int n_local, int* chunks, int*
     itype ns[nprocs];
     itype tmpns[nprocs], tmpchunks[nprocs];
 
-    std::cerr << "Before MPI_Allgather\n";
+    // std::cerr << "Before MPI_Allgather\n";
     CHECK_MPI(
         MPI_Allgather(
             &n_local,
@@ -37,28 +37,28 @@ __inline__ void chop_array_MPI(int nprocs, int n, int n_local, int* chunks, int*
             sizeof(itype),
             MPI_BYTE,
             MPI_COMM_WORLD));
-    std::cerr << "After MPI_Allgather\n";
+    // std::cerr << "After MPI_Allgather\n";
 
-    std::cerr << "1\n";
+    // std::cerr << "1\n";
     int i;
     for (i = 0; i < nprocs - 1; i++) {
         ns[i] = tmpns[i];
         chunkn[i] = ns[i] * sizeof(T);
     }
 
-    std::cerr << "2\n";
+    // std::cerr << "2\n";
     itype tot = 0;
     for (i = 0; i < nprocs - 1; i++) {
         tmpchunks[i] = tot;
         tot += (tmpns[itaskmap[i]] * sizeof(T));
     }
 
-    std::cerr << "3\n";
+    // std::cerr << "3\n";
     for (i = 0; i < nprocs - 1; i++) {
         chunks[i] = tmpchunks[taskmap[i]];
     }
 
-    std::cerr << "4\n";
+    // std::cerr << "4\n";
     chunkn[nprocs - 1] = (n * sizeof(T)) - tot;
     chunks[i] = tot;
 }
@@ -70,12 +70,10 @@ vector<vtype>* aggregate_vector(vector<vtype>* u_local, itype full_n)
     vector<vtype>* h_u_local = Vector::copyToHost(u_local);
     vector<vtype>* h_u = Vector::init<vtype>(full_n, true, false);
 
-    std::cerr << "Before chop_array_MPI\n";
+    // std::cerr << "Before chop_array_MPI\n";
     int chunks[nprocs], chunkn[nprocs];
     chop_array_MPI<vtype>(nprocs, full_n, u_local->n, chunks, chunkn);
-    std::cerr << "After chop_array_MPI\n";
 
-    std::cerr << "Before MPI_Allgatherv\n";
     CHECK_MPI(
         MPI_Allgatherv(
             h_u_local->val,
@@ -86,20 +84,8 @@ vector<vtype>* aggregate_vector(vector<vtype>* u_local, itype full_n)
             chunks,
             MPI_BYTE,
             MPI_COMM_WORLD));
-    std::cerr << "After MPI_Allgatherv\n";
-
-    /*
-    if(u == NULL) {
-      VectorcopyToDevice_CNT
-      u = Vector::copyToDevice(h_u);
-    } else
-      CHECK_DEVICE( cudaMemcpy(u->val, h_u->val, h_u->n * sizeof(vtype), cudaMemcpyHostToDevice) );
-    */
 
     Vector::free(h_u_local);
-    // Vector::free(h_u);
-
-    // return u;
     return h_u;
 }
 
@@ -126,9 +112,7 @@ vector<vtype>* aggregate_vector(vector<vtype>* u_local, itype full_n, vector<vty
             MPI_COMM_WORLD));
 
     if (u == NULL) {
-        VectorcopyToDevice_CNT
-            u
-            = Vector::copyToDevice(h_u);
+        u = Vector::copyToDevice(h_u);
     } else {
         CHECK_DEVICE(cudaMemcpy(u->val, h_u->val, h_u->n * sizeof(vtype), cudaMemcpyHostToDevice));
     }
@@ -233,7 +217,7 @@ CSR* split_local(CSR* A)
     return Alocal;
 }
 
-CSR* split_matrix_mpi(CSR* A)
+CSR* split_matrix_mpi_host(CSR* A)
 {
     _MPI_ENV;
 
@@ -346,10 +330,14 @@ CSR* split_matrix_mpi(CSR* A)
             Alocal->row[i] -= shift;
         }
     }
+    return Alocal;
+}
 
+CSR* split_matrix_mpi(CSR* A)
+{
+    CSR* Alocal = split_matrix_mpi_host(A);
     CSR* d_Alocal = CSRm::copyToDevice(Alocal);
     CSRm::free(Alocal);
-
     return d_Alocal;
 }
 
@@ -488,96 +476,6 @@ int stringCmp(const void* a, const void* b)
 {
     return strcmp((const char*)a, (const char*)b);
 }
-
-#if false
-#define MAXLEN 128
-void  assignDeviceToProcess(int *p2myrank)
-{
-       char     host_name[MPI_MAX_PROCESSOR_NAME];
-       char (*host_names)[MPI_MAX_PROCESSOR_NAME];
-       char gpuname[MAXLEN];
-       MPI_Comm nodeComm;
-
-
-       int i, n, namelen, color, rank, nprocs, myrank,gpu_per_node;
-       size_t bytes;
-       int dev, err1;
-       struct cudaDeviceProp deviceProp;
-
-       /* Check if the device has been alreasy assigned */
-
-       MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-       MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
-       MPI_Get_processor_name(host_name,&namelen);
-
-       bytes = nprocs * sizeof(char[MPI_MAX_PROCESSOR_NAME]);
-       host_names = (char (*)[MPI_MAX_PROCESSOR_NAME]) malloc(bytes);
-
-       strcpy(host_names[rank], host_name);
-
-       for (n=0; n<nprocs; n++)
-       {
-        MPI_Bcast(&(host_names[n]),MPI_MAX_PROCESSOR_NAME, MPI_CHAR, n, MPI_COMM_WORLD);
-       }
-
-       qsort(host_names, nprocs,  sizeof(char[MPI_MAX_PROCESSOR_NAME]), stringCmp);
-
-       color = 0;
-
-       for (n=0; n<nprocs; n++)
-       {
-         if(n>0&&strcmp(host_names[n-1], host_names[n])) color++;
-         if(strcmp(host_name, host_names[n]) == 0) break;
-       }
-
-       MPI_Comm_split(MPI_COMM_WORLD, color, 0, &nodeComm);
-
-       MPI_Comm_rank(nodeComm, &myrank);
-       MPI_Comm_size(nodeComm, &gpu_per_node);
-
-       p2myrank[0]=myrank;
-
-        /* Find out how many DP capable GPUs are in the system and their device number */
-       int deviceCount,slot=0;
-       int *devloc;
-       cudaGetDeviceCount(&deviceCount);
-       printf("deviceCount: %d\n", deviceCount);
-       devloc=(int *)malloc(deviceCount*sizeof(int));
-       devloc[0]=0;
-       for (dev = 0; dev < deviceCount; ++dev)
-        {
-          printf("%d %d\n", myrank, dev);
-        cudaGetDeviceProperties(&deviceProp, dev);
-           devloc[slot]=dev;
-           slot++;
-        }
-       printf ("Assigning device %d  to process on node %s rank %d \n",devloc[myrank], host_name, rank );
-       /* Assign device to MPI process, initialize BLAS and probe device properties */
-       CHECK_DEVICE(cudaSetDevice(devloc[myrank]));
-       snprintf(gpuname,sizeof(gpuname),"%d",devloc[myrank]);
-       if(setenv("CUDA_VISIBLE_DEVICES",gpuname,1)<0) {
-           fprintf(stderr,"Could not set CUDA_VISIBLE_DEVICES env variable\n");
-           exit(1);
-       }
-       return;
-}
-void  assignDeviceToProcess(int localRank){
-  int dev, deviceCount, slot=0;
-  struct cudaDeviceProp deviceProp;
-
-  CHECK_DEVICE(cudaGetDeviceCount(&deviceCount));
-
-  if(!deviceCount) throw std::exception();
-
-  int *devloc = new int[deviceCount];
-  for(dev = 0; dev < deviceCount; ++dev){
-      CHECK_DEVICE(cudaGetDeviceProperties(&deviceProp, dev));
-      if(deviceProp.major > 1) devloc[slot++] = dev;
-  }
-  CHECK_DEVICE(cudaSetDevice(devloc[localRank % slot]));
-  printf ("Assigning device %d to local rank: %d\n", devloc[localRank % slot], localRank );
-}
-#endif
 
 void checkMatrixMPI(CSR* A, bool check_diagonal = true)
 {

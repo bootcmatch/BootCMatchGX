@@ -2,7 +2,9 @@
 #include "AMG.h"
 
 #include "utility/cudamacro.h"
-#include "utility/function_cnt.h"
+#include "utility/logf.h"
+#include "utility/memory.h"
+#include "utility/profiling.h"
 
 namespace AMG {
 
@@ -10,10 +12,8 @@ namespace Hierarchy {
 
     hierarchy* init(itype num_levels, bool allocate_mem)
     {
-        hierarchy* H = NULL;
         // on the host
-        H = (hierarchy*)Malloc(sizeof(hierarchy));
-        CHECK_HOST(H);
+        hierarchy* H = MALLOC(hierarchy, 1, true);
 
         H->num_levels = num_levels;
         H->op_cmplx = 0;
@@ -25,26 +25,13 @@ namespace Hierarchy {
         H->P_local_array = NULL;
 
         if (allocate_mem) {
-            H->A_array = (CSR**)Malloc(num_levels * sizeof(CSR*));
-            CHECK_HOST(H->A_array);
-
-            H->P_array = (CSR**)Malloc((num_levels - 1) * sizeof(CSR*));
-            CHECK_HOST(H->P_array);
-
-            H->R_array = (CSR**)Malloc((num_levels - 1) * sizeof(CSR*));
-            CHECK_HOST(H->R_array);
-
-            H->R_local_array = (CSR**)Malloc((num_levels - 1) * sizeof(CSR*));
-            CHECK_HOST(H->R_local_array);
-
-            H->P_local_array = (CSR**)Malloc((num_levels - 1) * sizeof(CSR*));
-            CHECK_HOST(H->P_local_array);
-
-            H->D_array = (vector<vtype>**)Malloc(num_levels * sizeof(vector<vtype>*));
-            CHECK_HOST(H->D_array);
-
-            H->M_array = (vector<vtype>**)Malloc(num_levels * sizeof(vector<vtype>*));
-            CHECK_HOST(H->M_array);
+            H->A_array = MALLOC(CSR*, num_levels, true);
+            H->P_array = MALLOC(CSR*, num_levels - 1, true);
+            H->R_array = MALLOC(CSR*, num_levels - 1, true);
+            H->R_local_array = MALLOC(CSR*, num_levels - 1, true);
+            H->P_local_array = MALLOC(CSR*, num_levels - 1, true);
+            H->D_array = MALLOC(vector<vtype>*, num_levels, true);
+            H->M_array = MALLOC(vector<vtype>*, num_levels, true);
 
             for (int i = 0; i < H->num_levels; i++) {
                 H->D_array[i] = NULL;
@@ -62,53 +49,67 @@ namespace Hierarchy {
 
     void free(hierarchy* H)
     {
+        if (H) {
+            for (int i = 0; i < H->num_levels; i++) {
 
-        for (int i = 0; i < H->num_levels; i++) {
-
-            // skip the original matrix
-            if (i > 0) {
-                CSRm::free(H->A_array[i]);
-            }
-
-            if (H->D_array[i] != NULL) {
-                Vector::free(H->D_array[i]);
-            }
-
-            if (H->M_array[i] != NULL) {
-                Vector::free(H->M_array[i]);
-            }
-
-            if (i != H->num_levels - 1) {
-                CSRm::free(H->P_array[i]);
-                if (H->R_array[i] != NULL) {
-                    CSRm::free(H->R_array[i]);
+                // skip the original matrix
+                if (i > 0) {
+                    CSRm::free(H->A_array[i]);
                 }
-                if (H->R_local_array[i] != NULL) {
-                    CSRm::free(H->R_local_array[i]);
+
+                if (H->D_array[i] != NULL) {
+                    Vector::free(H->D_array[i]);
                 }
-                if (H->P_local_array[i] != NULL) {
-                    CSRm::free(H->P_local_array[i]);
+
+                if (H->M_array[i] != NULL) {
+                    Vector::free(H->M_array[i]);
+                }
+
+                if (i != H->num_levels - 1) {
+                    CSRm::free(H->P_array[i]);
+                    if (H->R_array[i] != NULL) {
+                        CSRm::free(H->R_array[i]);
+                    }
+                    if (H->R_local_array[i] != NULL) {
+                        CSRm::free(H->R_local_array[i]);
+                    }
+                    if (H->P_local_array[i] != NULL) {
+                        CSRm::free(H->P_local_array[i]);
+                    }
                 }
             }
+
+            FREE(H->A_array);
+            FREE(H->D_array);
+            FREE(H->M_array);
+            FREE(H->P_array);
+            H->A_array = NULL;
+            H->D_array = NULL;
+            H->M_array = NULL;
+            H->P_array = NULL;
+
+            FREE(H);
         }
-
-        std::free(H->A_array);
-        std::free(H->D_array);
-        std::free(H->M_array);
-        std::free(H->P_array);
-
-        std::free(H);
     }
 
     void finalize_level(hierarchy* H, int levels_used)
     {
-
         assert(levels_used > 0);
 
         H->num_levels = levels_used;
 
         H->A_array = (CSR**)realloc(H->A_array, levels_used * sizeof(CSR*));
         CHECK_HOST(H->A_array);
+
+        H->D_array = (vector<vtype>**)realloc(H->D_array, levels_used * sizeof(vector<vtype>*));
+        CHECK_HOST(H->D_array);
+
+        H->M_array = (vector<vtype>**)realloc(H->M_array, levels_used * sizeof(vector<vtype>*));
+        CHECK_HOST(H->M_array);
+
+        if (levels_used == 1) {
+            return;
+        }
 
         H->P_array = (CSR**)realloc(H->P_array, (levels_used - 1) * sizeof(CSR*));
         CHECK_HOST(H->P_array);
@@ -121,18 +122,11 @@ namespace Hierarchy {
 
         H->P_local_array = (CSR**)realloc(H->P_local_array, (levels_used - 1) * sizeof(CSR*));
         CHECK_HOST(H->P_local_array);
-
-        H->D_array = (vector<vtype>**)realloc(H->D_array, levels_used * sizeof(vector<vtype>*));
-        CHECK_HOST(H->D_array);
-
-        H->M_array = (vector<vtype>**)realloc(H->M_array, levels_used * sizeof(vector<vtype>*));
-        CHECK_HOST(H->M_array);
     }
 
     long getNNZglobal(CSR* A)
     {
-        PUSH_RANGE(__func__, 7)
-
+        // unsigned long nnzp = 0;
         unsigned long nnzp = 0;
         unsigned long lnnz = A->nnz;
         CHECK_MPI(
@@ -144,7 +138,6 @@ namespace Hierarchy {
                 MPI_SUM,
                 MPI_COMM_WORLD));
 
-        POP_RANGE
         return nnzp;
     }
 
@@ -171,27 +164,26 @@ namespace Hierarchy {
         return wcmplxfinal;
     }
 
-    void printInfo(hierarchy* h)
+    void printInfo(FILE* fp, hierarchy* h)
     {
-
+        logf(fp, "Number of levels                             : %d\n", h->num_levels);
         for (int i = 0; i < h->num_levels; i++) {
             CSR* Ai = h->A_array[i];
             float avg_nnz = (float)Ai->nnz / (float)Ai->n;
-            std::cout << "A" << i << " n: " << Ai->full_n << " nnz: " << Ai->nnz << " avg_nnz: " << avg_nnz << "\n";
+
+            logf(fp, "A%-44d: n: %ld nnz: %d avg_nnz: %f\n",
+                i, Ai->full_n, Ai->nnz, avg_nnz);
         }
-        std::cout << "\nCurrent cmplx for V-cycle: " << h->op_cmplx;
-        std::cout << "\nCurrent cmplx for W-cycle: " << h->op_wcmplx;
-        std::cout << "\nAverage Coarsening Ratio: " << h->avg_cratio << "\n";
+        logf(fp, "Current cmplx for V-cycle                    : %lf\n", h->op_cmplx);
+        logf(fp, "Current cmplx for W-cycle                    : %lf\n", h->op_wcmplx);
+        logf(fp, "Average Coarsening Ratio                     : %lf\n", h->avg_cratio);
     }
 }
 
 namespace BuildData {
     buildData* init(itype maxlevels, itype maxcoarsesize, itype sweepnumber, itype agg_interp_type, CoarseSolverType coarse_solver, RelaxType CRrelax_type, vtype CRrelax_weight, itype CRit, vtype CRratio)
     {
-        buildData* bd = NULL;
-
-        bd = (buildData*)Malloc(sizeof(buildData));
-        CHECK_HOST(bd);
+        buildData* bd = MALLOC(buildData, 1, true);
 
         bd->maxlevels = maxlevels;
         bd->maxcoarsesize = maxcoarsesize;
@@ -213,15 +205,16 @@ namespace BuildData {
 
     void free(buildData* bd)
     {
-        std::free(bd);
+        if (bd) {
+            Vector::free(bd->w);
+            bd->w = NULL;
+            FREE(bd);
+        }
     }
 
     buildData* initDefault()
     {
-        buildData* bd = NULL;
-
-        bd = (buildData*)Malloc(sizeof(buildData));
-        CHECK_HOST(bd);
+        buildData* bd = MALLOC(buildData, 1, true);
 
         bd->maxlevels = 100;
         bd->maxcoarsesize = 100;
@@ -265,10 +258,7 @@ namespace BuildData {
 namespace ApplyData {
     applyData* initDefault()
     {
-
-        applyData* ad = NULL;
-        ad = (applyData*)Malloc(sizeof(applyData));
-        CHECK_HOST(ad);
+        applyData* ad = MALLOC(applyData, 1, true);
 
         ad->cycle_type = CycleType::V_CYCLE;
         ad->relax_type = RelaxType::L1_JACOBI;
@@ -283,18 +273,21 @@ namespace ApplyData {
 
     void free(applyData* ad)
     {
-        std::free(ad->num_grid_sweeps);
-        std::free(ad);
+        if (ad) {
+            FREE(ad->num_grid_sweeps);
+            ad->num_grid_sweeps = NULL;
+            FREE(ad);
+        }
     }
 
-    void print(applyData* ad)
+    void print(FILE* fp, applyData* ad)
     {
-        std::cout << "\ncycle_type: " << cycle_type_to_string(ad->cycle_type) << "\n";
-        std::cout << "relax_type: " << relax_type_to_string(ad->relax_type) << "\n";
-        std::cout << "relaxnumber_coarse: " << ad->relaxnumber_coarse << "\n";
-        std::cout << "prerelax_number: " << ad->prerelax_number << "\n";
-        std::cout << "postrelax_number: " << ad->postrelax_number << "\n";
-        std::cout << "relax_weight: " << ad->relax_weight << "\n\n";
+        logf(fp, "ncycle_type                                  : %s\n", cycle_type_to_string(ad->cycle_type).c_str());
+        logf(fp, "relax_type                                   : %s\n", relax_type_to_string(ad->relax_type).c_str());
+        logf(fp, "relaxnumber_coarse                           : %d\n", ad->relaxnumber_coarse);
+        logf(fp, "prerelax_number                              : %d\n", ad->prerelax_number);
+        logf(fp, "postrelax_number                             : %d\n", ad->postrelax_number);
+        logf(fp, "relax_weight                                 : %f\n", ad->relax_weight);
     }
 
     applyData* initByParams(const params& p)
@@ -313,13 +306,27 @@ namespace ApplyData {
     void setGridSweeps(applyData* ad, int max_level)
     {
         max_level--;
-        ad->num_grid_sweeps = (int*)Malloc(max_level * sizeof(int));
-        CHECK_HOST(ad->num_grid_sweeps);
+        if (!max_level) {
+            return;
+        }
 
-        int i, j;
+        ad->num_grid_sweeps = MALLOC(int, max_level, false);
 
-        for (i = 0; i < max_level; i++) {
+        for (int i = 0; i < max_level; i++) {
             ad->num_grid_sweeps[i] = 1;
+        }
+
+        if (ad->cycle_type == CycleType::H_CYCLE) {
+            for (int i = 0; i < max_level; i++) {
+                int j = i % 2; /*step is fixed to 2; it can be also different */
+                if (j == 0) {
+                    ad->num_grid_sweeps[i] = 2;
+                }
+            }
+        } else if (ad->cycle_type == CycleType::W_CYCLE) {
+            for (int i = 0; i < max_level - 1; i++) {
+                ad->num_grid_sweeps[i] = 2;
+            }
         }
     }
 }
@@ -327,14 +334,11 @@ namespace ApplyData {
 namespace BootBuildData {
     bootBuildData* initDefault()
     {
-
-        bootBuildData* bd = NULL;
-        bd = (bootBuildData*)Malloc(sizeof(bootBuildData));
-        CHECK_HOST(bd);
+        bootBuildData* bd = MALLOC(bootBuildData, 1, true);
 
         bd->max_hrc = 10;
         bd->conv_ratio = 0.80;
-        bd->bootstrap_composition_type = BootstrapCompositionType::MULTIPLICATIVE;
+        bd->bootstrap_composition_type = BootstrapCompositionType::SYMMETRIZED_MULTIPLICATIVE;
         bd->solver_it = 15;
 
         bd->amg_data = AMG::BuildData::initDefault();
@@ -344,16 +348,19 @@ namespace BootBuildData {
 
     void free(bootBuildData* ad)
     {
-        AMG::BuildData::free(ad->amg_data);
-        std::free(ad);
+        if (ad) {
+            AMG::BuildData::free(ad->amg_data);
+            ad->amg_data = NULL;
+            FREE(ad);
+        }
     }
 
-    void print(bootBuildData* ad)
+    void print(FILE* fp, bootBuildData* ad)
     {
-        std::cout << "\nmax_hrc: " << ad->max_hrc << "\n";
-        std::cout << "conv_ratio: " << ad->conv_ratio << "\n";
-        std::cout << "bootstrap_composition_type: " << bootstrap_composition_type_to_string(ad->bootstrap_composition_type) << "\n";
-        std::cout << "solver_it: " << ad->solver_it << "\n\n";
+        logf(fp, "max_hrc                                      : %d\n", ad->max_hrc);
+        logf(fp, "conv_ratio                                   : %f\n", ad->conv_ratio);
+        logf(fp, "bootstrap_composition_type                   : %s\n", bootstrap_composition_type_to_string(ad->bootstrap_composition_type).c_str());
+        logf(fp, "solver_it                                    : %d\n", ad->solver_it);
     }
 
     bootBuildData* initByParams(CSR* A, params p)
@@ -365,16 +372,14 @@ namespace BootBuildData {
         bootamg_data->max_hrc = p.max_hrc;
         bootamg_data->conv_ratio = p.conv_ratio;
 
-        amg_data->sweepnumber = p.aggrsweeps;
+        amg_data->sweepnumber = p.aggrsweeps + 1;
         amg_data->agg_interp_type = p.aggrtype;
         amg_data->maxlevels = p.max_levels;
         amg_data->coarse_solver = p.coarse_solver;
         amg_data->CRrelax_type = p.relax_type;
 
         amg_data->A = A;
-        Vectorinit_CNT
-            amg_data->w
-            = Vector::init<vtype>(A->n, true, true);
+        amg_data->w = Vector::init<vtype>(A->n, true, true);
         Vector::fillWithValue(amg_data->w, 1.0);
 
         AMG::BuildData::setMaxCoarseSize(amg_data);
@@ -387,31 +392,36 @@ namespace Boot {
 
     boot* init(int n_hrc, double estimated_ratio)
     {
-        boot* b = (boot*)Malloc(sizeof(boot));
-        CHECK_HOST(b);
+        BEGIN_PROF(__FUNCTION__);
+        boot* b = MALLOC(boot, 1, true);
 
         b->n_hrc = n_hrc;
         b->estimated_ratio = estimated_ratio;
-        b->H_array = (hierarchy**)Malloc(n_hrc * sizeof(hierarchy*));
-        CHECK_HOST(b->H_array);
+        b->H_array = MALLOC(hierarchy*, n_hrc, true);
 
+        END_PROF(__FUNCTION__);
         return b;
     }
 
     void free(boot* b)
     {
-        for (int i = 0; i < b->n_hrc; i++) {
-            AMG::Hierarchy::free(b->H_array[i]);
+        if (b) {
+            for (int i = 0; i < b->n_hrc; i++) {
+                AMG::Hierarchy::free(b->H_array[i]);
+                b->H_array[i] = NULL;
+            }
+            FREE(b);
         }
-        std::free(b);
     }
 
     void finalize(boot* b, int num_hrc)
     {
         assert(num_hrc > 0);
+        BEGIN_PROF(__FUNCTION__);
         b->n_hrc = num_hrc;
         b->H_array = (hierarchy**)realloc(b->H_array, num_hrc * sizeof(hierarchy*));
         CHECK_HOST(b->H_array);
+        END_PROF(__FUNCTION__);
     }
 }
 }

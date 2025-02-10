@@ -2,6 +2,7 @@
 #include "generator/laplacian.h"
 #include "utility/assignDeviceToProcess.h"
 #include "utility/globals.h"
+#include "utility/memory.h"
 #include "utility/mpi.h"
 #include <assert.h>
 #include <getopt.h>
@@ -168,8 +169,8 @@ int main(int argc, char** argv)
 
     CSRm::free(Alocal);
 
-    Free(log_file_name);
-    Free(out_file_name);
+    FREE(log_file_name);
+    FREE(out_file_name);
     MPI_Finalize();
     return 0;
 }

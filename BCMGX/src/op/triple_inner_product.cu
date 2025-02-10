@@ -1,9 +1,8 @@
 #include "triple_inner_product.h"
 
 #include "utility/cudamacro.h"
-#include "utility/function_cnt.h"
-#include "utility/metrics.h"
-#include "utility/timing.h"
+#include "utility/globals.h"
+#include "utility/profiling.h"
 
 __global__ void _triple_innerproduct(itype n, vtype* r, vtype* w, vtype* q, vtype* v, vtype* alpha_beta_gamma, itype shift)
 {
@@ -62,24 +61,17 @@ __global__ void _triple_innerproduct(itype n, vtype* r, vtype* w, vtype* q, vtyp
     }
 }
 
-void triple_innerproduct(vector<vtype>* r, vector<vtype>* w, vector<vtype>* q, vector<vtype>* v, vtype* alpha, vtype* beta, vtype* gamma, itype shift)
+void triple_innerproduct(vector<vtype>* r, vector<vtype>* w, vector<vtype>* q, vector<vtype>* v, vector<vtype>* alpha_beta_gamma, vtype* alpha, vtype* beta, vtype* gamma, itype shift)
 {
-    PUSH_RANGE(__func__, 4)
+    BEGIN_PROF(__FUNCTION__);
 
     _MPI_ENV;
 
     assert(r->n == w->n && w->n == q->n);
 
-#if DETAILED_TIMING
-    if (ISMASTER) {
-        TIME::start();
-    }
-#endif
-
-    Vectorinit_CNT
-        vector<vtype>* alpha_beta_gamma
-        = Vector::init<vtype>(3, true, true);
     Vector::fillWithValue(alpha_beta_gamma, 0.);
+
+    assert(alpha_beta_gamma && alpha_beta_gamma->val);
 
     GridBlock gb = gb1d(r->n, BLOCKSIZE);
 
@@ -87,21 +79,9 @@ void triple_innerproduct(vector<vtype>* r, vector<vtype>* w, vector<vtype>* q, v
 
     vector<vtype>* alpha_beta_gamma_host = Vector::copyToHost(alpha_beta_gamma);
 
-#if DETAILED_TIMING
-    if (ISMASTER) {
-        cudaDeviceSynchronize();
-        TOTAL_TRIPLEPROD_TIME += TIME::stop();
-    }
-#endif
-
     vtype abg[3];
 
-#if DETAILED_TIMING
-    if (ISMASTER) {
-        TIME::start();
-    }
-#endif
-
+    BEGIN_PROF("MPI_Allreduce");
     CHECK_MPI(MPI_Allreduce(
         alpha_beta_gamma_host->val,
         abg,
@@ -109,18 +89,13 @@ void triple_innerproduct(vector<vtype>* r, vector<vtype>* w, vector<vtype>* q, v
         MPI_DOUBLE,
         MPI_SUM,
         MPI_COMM_WORLD));
-
-#if DETAILED_TIMING
-    if (ISMASTER) {
-        cudaDeviceSynchronize();
-        TOTAL_ALLREDUCE_TIME += TIME::stop();
-    }
-#endif
+    END_PROF("MPI_Allreduce");
 
     *alpha = abg[0];
     *beta = abg[1];
     *gamma = abg[2];
 
-    Vector::free(alpha_beta_gamma);
-    POP_RANGE
+    Vector::free(alpha_beta_gamma_host);
+
+    END_PROF(__FUNCTION__);
 }

@@ -1,6 +1,7 @@
 #include "preconditioner/bcmg/BcmgPreconditionContext.h"
-#include "utility/function_cnt.h"
+#include "utility/memory.h"
 #include "utility/utils.h"
+#include "utility/profiling.h"
 
 #define XTENTFACT 1
 
@@ -8,13 +9,13 @@ BcmgPreconditionContext Bcmg::context;
 
 void Bcmg::initPreconditionContext(hierarchy* hrrch)
 {
-    PUSH_RANGE(__func__, 4)
+    BEGIN_PROF(__FUNCTION__);
     _MPI_ENV;
     Bcmg::context.hrrch = hrrch;
     unsigned int num_levels = hrrch->num_levels;
 
     Bcmg::context.max_level_nums = num_levels;
-    Bcmg::context.max_coarse_size = (itype*)Malloc(num_levels * sizeof(int));
+    Bcmg::context.max_coarse_size = MALLOC(itype, num_levels, true);
     assert(Bcmg::context.max_coarse_size != NULL);
 
     vectorCollection<vtype>* RHS_buffer = Vector::Collection::init<vtype>(num_levels);
@@ -27,18 +28,12 @@ void Bcmg::initPreconditionContext(hierarchy* hrrch)
         itype n_i = hrrch->A_array[i]->n;
         itype n_i_full = hrrch->A_array[i]->full_n;
         Bcmg::context.max_coarse_size[i] = n_i;
-        Vectorinit_CNT
-            RHS_buffer->val[i]
-            = Vector::init<vtype>(n_i, true, true);
+        RHS_buffer->val[i] = Vector::init<vtype>(n_i, true, true);
         if (nprocs > 1) {
             n_i = (int)(hrrch->A_array[i]->n * XTENTFACT); /* Massimo March 13 2024. Was hrrch->A_array[i]->n; */
         }
-        Vectorinit_CNT
-            Xtent_buffer_local->val[i]
-            = Vector::init<vtype>((i != num_levels - 1) ? n_i : n_i_full, true, true);
-        Vectorinit_CNT
-            Xtent_buffer_2_local->val[i]
-            = Vector::init<vtype>((i != num_levels - 1) ? n_i : n_i_full, true, true);
+        Xtent_buffer_local->val[i] = Vector::init<vtype>((i != num_levels - 1) ? n_i : n_i_full, true, true);
+        Xtent_buffer_2_local->val[i] = Vector::init<vtype>((i != num_levels - 1) ? n_i : n_i_full, true, true);
         Vector::fillWithValue(Xtent_buffer_local->val[i], 0.);
         Vector::fillWithValue(Xtent_buffer_2_local->val[i], 0.);
     }
@@ -48,7 +43,7 @@ void Bcmg::initPreconditionContext(hierarchy* hrrch)
     Bcmg::context.Xtent_buffer_local = Xtent_buffer_local;
     Bcmg::context.Xtent_buffer_2_local = Xtent_buffer_2_local;
 
-    POP_RANGE
+    END_PROF(__FUNCTION__);
 }
 
 void Bcmg::setHrrchBufferSize(hierarchy* hrrch)
@@ -66,10 +61,7 @@ void Bcmg::setHrrchBufferSize(hierarchy* hrrch)
 
             Bcmg::context.max_coarse_size[i] = n_i;
             Vector::free(Bcmg::context.RHS_buffer->val[i]);
-            Vectorinit_CNT
-                Bcmg::context.RHS_buffer->val[i]
-                = Vector::init<vtype>(n_i, true, true);
-
+            Bcmg::context.RHS_buffer->val[i] = Vector::init<vtype>(n_i, true, true);
             Vector::free(Bcmg::context.Xtent_buffer_local->val[i]);
             Vector::free(Bcmg::context.Xtent_buffer_2_local->val[i]);
 
@@ -77,19 +69,11 @@ void Bcmg::setHrrchBufferSize(hierarchy* hrrch)
                 n_i = (int)(hrrch->A_array[i]->n * XTENTFACT); /* Massimo March 13 2024. Was hrrch->A_array[i]->n; */
             }
             if (i == num_levels - 1) {
-                Vectorinit_CNT
-                    Bcmg::context.Xtent_buffer_local->val[i]
-                    = Vector::init<vtype>(n_i_full, true, true);
-                Vectorinit_CNT
-                    Bcmg::context.Xtent_buffer_2_local->val[i]
-                    = Vector::init<vtype>(n_i_full, true, true);
+                Bcmg::context.Xtent_buffer_local->val[i] = Vector::init<vtype>(n_i_full, true, true);
+                Bcmg::context.Xtent_buffer_2_local->val[i] = Vector::init<vtype>(n_i_full, true, true);
             } else {
-                Vectorinit_CNT
-                    Bcmg::context.Xtent_buffer_local->val[i]
-                    = Vector::init<vtype>(n_i, true, true);
-                Vectorinit_CNT
-                    Bcmg::context.Xtent_buffer_2_local->val[i]
-                    = Vector::init<vtype>(n_i, true, true);
+                Bcmg::context.Xtent_buffer_local->val[i] = Vector::init<vtype>(n_i, true, true);
+                Bcmg::context.Xtent_buffer_2_local->val[i] = Vector::init<vtype>(n_i, true, true);
             }
 
         } else {
@@ -105,10 +89,8 @@ void Bcmg::setHrrchBufferSize(hierarchy* hrrch)
 
 void Bcmg::freePreconditionContext()
 {
-
-    free(Bcmg::context.max_coarse_size);
+    FREE(Bcmg::context.max_coarse_size);
     Vector::Collection::free(Bcmg::context.RHS_buffer);
-
     Vector::Collection::free(Bcmg::context.Xtent_buffer_local);
     Vector::Collection::free(Bcmg::context.Xtent_buffer_2_local);
 }

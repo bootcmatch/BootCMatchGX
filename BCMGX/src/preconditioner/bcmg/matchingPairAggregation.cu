@@ -1,10 +1,8 @@
-#include "matchingAggregation.h"
-#include "custom_cudamalloc/custom_cudamalloc.h"
 #include "datastruct/scalar.h"
+#include "matchingAggregation.h"
 #include "preconditioner/bcmg/matching.h"
-#include "utility/function_cnt.h"
-#include "utility/metrics.h"
-#include "utility/timing.h"
+#include "utility/memory.h"
+#include "utility/profiling.h"
 
 extern int* taskmap;
 extern int* itaskmap;
@@ -110,15 +108,10 @@ void* d_temp_storage = NULL;
 
 CSR* makeP_GPU(CSR* A, vector<itype>* M, vector<vtype>* w, bool used_by_solver = true)
 {
-    PUSH_RANGE(__func__, 7)
+    BEGIN_PROF(__FUNCTION__);
 
-    // --------------------------- Custom CudaMalloc ---------------------------------
-    CSR* P = CSRm::init(A->n, 1, A->n, false, true, false, A->full_n, A->row_shift);
-    P->val = CustomCudaMalloc::alloc_vtype(P->nnz, (used_by_solver ? 0 : 1));
-    P->col = CustomCudaMalloc::alloc_itype(P->nnz, (used_by_solver ? 0 : 1));
-    P->row = CustomCudaMalloc::alloc_itype((P->n) + 1, (used_by_solver ? 0 : 1));
-    P->custom_alloced = true;
-    // -------------------------------------------------------------------------------
+    CSR* P = CSRm::init(A->n, 1, A->n, true, true, false, A->full_n, A->row_shift);
+
     // recycle  allocated memory
     itype* comp_Pcol = P->row;
 
@@ -142,8 +135,7 @@ CSR* makeP_GPU(CSR* A, vector<itype>* M, vector<vtype>* w, bool used_by_solver =
 
     // Allocate temporary storage
     if (d_temp_storage == NULL) {
-        cudaMalloc_CNT
-            CHECK_DEVICE(cudaMalloc(&d_temp_storage, temp_storage_bytes));
+        d_temp_storage = CUDA_MALLOC_BYTES(void, temp_storage_bytes);
     }
 
     cub::DeviceSelect::If(
@@ -162,49 +154,32 @@ CSR* makeP_GPU(CSR* A, vector<itype>* M, vector<vtype>* w, bool used_by_solver =
     gb = gb1d(A->n, BLOCKSIZE);
     _aggregate_symmetric_step_two<<<gb.g, gb.b>>>(A->n, P->val, M->val, P->col, w->val, d_num_selected_out->val, A->row_shift);
 
-    free(num_selected_out);
+    FREE(num_selected_out);
     num_selected_out = Scalar::getvalueFromDevice(d_num_selected_out);
     P->m = (*num_selected_out);
 
     gb = gb1d(A->n + 1, BLOCKSIZE);
     _make_P_row<<<gb.g, gb.b>>>(A->n, P->row);
     cudaDeviceSynchronize();
-    free(num_selected_out);
+    FREE(num_selected_out);
+    CUDA_FREE(d_temp_storage);
+    Scalar::free(d_num_selected_out);
 
-    POP_RANGE
+    END_PROF(__FUNCTION__);
     return P;
 }
 
-void matchingPairAggregation(handles* h, CSR* A, vector<vtype>* w, CSR** _P, CSR** _R, bool used_by_solver)
+void matchingPairAggregation(handles* h, buildData* amg_data, CSR* A, vector<vtype>* w, CSR** _P, CSR** _R, bool used_by_solver)
 {
-    PUSH_RANGE(__func__, 6)
+    BEGIN_PROF(__FUNCTION__);
 
     _MPI_ENV;
-    TIMER_DEF;
 
-    if (0) {
-        fprintf(stderr, "Task %d reached line %d in matchingPairAggregation (%s)\n", myid, __LINE__, __FILE__);
-    }
-    vector<itype>* M = suitor(h, A, w);
-    if (0) {
-        fprintf(stderr, "Task %d reached line %d in matchingPairAggregation (%s)\n", myid, __LINE__, __FILE__);
-    }
-    static int cnt;
+    vector<itype>* M = suitor(h, amg_data, A, w);
 
     CSR *R, *P;
 
-    // make P on GPU
-    if (DETAILED_TIMING && ISMASTER) {
-        cudaDeviceSynchronize();
-        TIMER_START;
-    }
     P = makeP_GPU(A, M, w, used_by_solver);
-
-    if (DETAILED_TIMING && ISMASTER) {
-        cudaDeviceSynchronize();
-        TIMER_STOP;
-        TOTAL_MAKE_P += TIMER_ELAPSED;
-    }
 
     gstype mt_shifts[nprocs], m_shifts[nprocs];
     gstype ms[nprocs];
@@ -222,9 +197,6 @@ void matchingPairAggregation(handles* h, CSR* A, vector<vtype>* w, CSR** _P, CSR
                 MPI_BYTE,
                 MPI_COMM_WORLD));
 
-        if (0) {
-            fprintf(stderr, "Task %d reached line %d in matchingPairAggregation (%s)\n", myid, __LINE__, __FILE__);
-        }
         gstype tot_m = 0;
 
         for (int i = 0; i < nprocs; i++) {
@@ -235,25 +207,31 @@ void matchingPairAggregation(handles* h, CSR* A, vector<vtype>* w, CSR** _P, CSR
             m_shifts[i] = mt_shifts[itaskmap[i]];
         }
 
+#if defined(GENERAL_TRANSPOSE)
+        CSRm::shift_cols(P, P->row_shift);
+        R = CSRm::transpose(P, log_file, "R");
+#else
         R = CSRm::Transpose_local(P, log_file);
-
+#endif
         CSRm::shift_cols(R, P->row_shift);
         R->row_shift = m_shifts[myid];
 
+#if defined(GENERAL_TRANSPOSE)
+        CSRm::shift_cols(P, m_shifts[myid] - P->row_shift);
+#else
         CSRm::shift_cols(P, m_shifts[myid]);
+#endif
+
         P->m = tot_m;
         R->full_n = tot_m;
     } else {
         R = CSRm::Transpose_local(P, log_file);
     }
 
-    if (0) {
-        fprintf(stderr, "Task %d reached line %d in matchingPairAggregation (%s)\n", myid, __LINE__, __FILE__);
-    }
-    free(M);
+    FREE(M);
 
     *_P = P;
     *_R = R;
 
-    POP_RANGE
+    END_PROF(__FUNCTION__);
 }

@@ -1,14 +1,8 @@
 #include "datastruct/CSR.h"
 #include "utility/ProcessSelector.h"
 #include "utility/arrays.h"
-
-/**
- * Function prototype.
- * Given an ordered array arr of length len, returns the index
- * of the highest element less than val.
- * Implementation in spspmpi.cu.
- */
-int bswhichprocess(gsstype* arr, int len, gsstype val);
+#include "utility/bswhichprocess.h"
+#include "utility/memory.h"
 
 ProcessSelector::ProcessSelector(CSR* dlA, FILE* debug)
     : debug(debug)
@@ -25,7 +19,7 @@ ProcessSelector::ProcessSelector(CSR* dlA, FILE* debug)
     // This piece of information will be used to determine which process
     // should receive previously collected data.
     // ---------------------------------------------------------------------------
-    rows_per_process = (stype*)Malloc(nprocs * sizeof(stype));
+    rows_per_process = MALLOC(stype, nprocs);
     CHECK_MPI(MPI_Allgather(
         &dlA->n, // Sent buffer
         sizeof(stype), // Sent count
@@ -41,7 +35,7 @@ ProcessSelector::ProcessSelector(CSR* dlA, FILE* debug)
     }
 
     // ---------------------------------------------------------------------------
-    row_shift_per_process = (gstype*)Malloc(nprocs * sizeof(gstype));
+    row_shift_per_process = MALLOC(gstype, nprocs);
     CHECK_MPI(MPI_Allgather(
         &dlA->row_shift, // Sent buffer
         sizeof(gstype), // Sent count
@@ -56,7 +50,7 @@ ProcessSelector::ProcessSelector(CSR* dlA, FILE* debug)
     // This piece of information will be used to determine which process
     // should receive previously collected data.
     // ---------------------------------------------------------------------------
-    last_row_index_per_process = (gsstype*)Malloc(nprocs * sizeof(gsstype));
+    last_row_index_per_process = MALLOC(gstype, nprocs);
     last_row_index_per_process[0] = rows_per_process[0] - 1;
     for (int i = 1; i < nprocs; i++) {
         last_row_index_per_process[i] = last_row_index_per_process[i - 1]
@@ -70,9 +64,9 @@ ProcessSelector::ProcessSelector(CSR* dlA, FILE* debug)
 
 ProcessSelector::~ProcessSelector()
 {
-    ::Free(last_row_index_per_process);
-    ::Free(rows_per_process);
-    ::Free(row_shift_per_process);
+    FREE(last_row_index_per_process);
+    FREE(rows_per_process);
+    FREE(row_shift_per_process);
 }
 
 void ProcessSelector::setUseRowShift(bool use_row_shift)
@@ -80,7 +74,7 @@ void ProcessSelector::setUseRowShift(bool use_row_shift)
     this->use_row_shift = use_row_shift;
 }
 
-int ProcessSelector::getProcessByRow(itype row)
+int ProcessSelector::getProcessByRow(gsstype /*itype*/ row)
 {
     if (use_row_shift) {
         row += row_shift;
@@ -99,13 +93,20 @@ int ProcessSelector::getProcessByRow(itype row)
     }
 
     if (!(row_shift_per_process[whichproc] <= row && row < row_shift_per_process[whichproc] + rows_per_process[whichproc])) {
+        _MPI_ENV;
         fprintf(stderr,
-            "Asking row %d to process %d, but process %d owns rows [%d, %d]\n",
+            "Process %d: Asking row %ld to process %d, but process %d owns rows [%lu, %lu]\n",
+            myid,
             row,
             whichproc,
             whichproc,
             row_shift_per_process[whichproc],
             row_shift_per_process[whichproc] + rows_per_process[whichproc] - 1);
+        if (ISMASTER) {
+            debugArray("rows_per_process[%s] = %u", rows_per_process, nprocs, false, stderr);
+            debugArray("row_shift_per_process[%s] = %lu", row_shift_per_process, nprocs, false, stderr);
+            debugArray("last_row_index_per_process[%s] = %lu", last_row_index_per_process, nprocs, false, stderr);
+        }
         exit(1);
     }
 

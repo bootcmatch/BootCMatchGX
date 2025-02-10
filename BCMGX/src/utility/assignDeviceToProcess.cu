@@ -1,4 +1,5 @@
 #include "utility/assignDeviceToProcess.h"
+#include "utility/memory.h"
 #include "utility/mpi.h"
 #include "utility/utils.h"
 
@@ -27,7 +28,8 @@ int assignDeviceToProcess()
     MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
     MPI_Get_processor_name(host_name, &namelen);
     bytes = nprocs * sizeof(char[MPI_MAX_PROCESSOR_NAME]);
-    host_names = (char(*)[MPI_MAX_PROCESSOR_NAME])Malloc(bytes);
+    host_names = (char(*)[MPI_MAX_PROCESSOR_NAME])malloc(bytes);
+    CHECK_HOST(host_names);
     strcpy(host_names[rank], host_name);
     for (n = 0; n < nprocs; n++) {
         MPI_Bcast(&(host_names[n]), MPI_MAX_PROCESSOR_NAME, MPI_CHAR, n,

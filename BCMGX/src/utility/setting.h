@@ -1,3 +1,6 @@
+/**
+ * @file
+ */
 #define BLOCKSIZE 512 // 1024C
 // Matrix's value type
 #define vtype double
@@ -15,8 +18,6 @@
 #define ITYPE_MPI MPI_INT
 #define STYPE_MPI MPI_UINT32_T
 #define GSTYPE_MPI MPI_UINT64_T
-
-#define VERBOSE 0
 
 // #define LOCAL_COARSEST 0
 

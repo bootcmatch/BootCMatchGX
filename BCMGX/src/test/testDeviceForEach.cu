@@ -1,5 +1,6 @@
 #include "utility/arrays.h"
 #include "utility/deviceForEach.h"
+#include "utility/memory.h"
 
 int main(int argc, char** argv)
 {
@@ -14,7 +15,7 @@ int main(int argc, char** argv)
 
     debugArray("dProcessedArr[%d] = %d\n", dArr, len, true, stderr);
 
-    cudaFree(dArr);
+    CUDA_FREE(dArr);
 
     return 0;
 }

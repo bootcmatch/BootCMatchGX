@@ -1,34 +1,11 @@
 #include "utility/setting.h"
 #include "utility/utils.h"
 
-void* Realloc(void* pptr, size_t sz)
-{
-    if (!sz) {
-        printf("Allocating zero bytes...\n");
-        exit(EXIT_FAILURE);
-    }
-    void* ptr = (void*)realloc(pptr, sz);
-    if (!ptr) {
-        fprintf(stderr, "Cannot allocate %zu bytes...\n", sz);
-        exit(EXIT_FAILURE);
-    }
-    return ptr;
-}
-
-void* Malloc(size_t sz)
-{
-    if (!sz) {
-        printf("Allocating zero bytes...\n");
-        exit(EXIT_FAILURE);
-    }
-    void* ptr = (void*)malloc(sz);
-    if (!ptr) {
-        fprintf(stderr, "Cannot allocate %zu bytes...\n", sz);
-        exit(EXIT_FAILURE);
-    }
-    memset(ptr, 0, sz);
-    return ptr;
-}
+// void check_free_memory(int myid){
+//     size_t free_mem, total_mem;
+//     CHECK_DEVICE( cudaMemGetInfo( &free_mem, &total_mem ))
+//     printf("[MEMORY proc %d] Free: %zu - Total: %zu - Allocated: %zu (%zu MByte)\n", myid, free_mem, total_mem, total_mem-free_mem, (total_mem-free_mem)/(1024*1024));
+// }
 
 namespace Eval {
 void printMetaData(const char* name, double value, int type)

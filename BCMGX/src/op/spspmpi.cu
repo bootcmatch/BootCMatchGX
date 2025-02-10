@@ -1,15 +1,15 @@
 #include "spspmpi.h"
 
-#include "basic_kernel/halo_communication/local_permutation.h"
 #include "datastruct/CSR.h"
+#include "halo_communication/local_permutation.h"
+#include "utility/bswhichprocess.h"
 #include "utility/cudamacro.h"
-#include "utility/function_cnt.h"
+#include "utility/memory.h"
 #include "utility/setting.h"
 
 #include <unistd.h>
 
 #define BITXBYTE 8
-// #define CSRSEG
 
 #ifdef NSP2_NSPARSE
 #include "nsp2.h"
@@ -19,6 +19,17 @@
 
 extern int *itaskmap, *taskmap;
 
+/**
+ * @brief Computes the number of non-zero elements (NNZ) for each row in a sparse matrix.
+ *
+ * This kernel calculates the number of non-zero elements for each row in the sparse matrix
+ * based on the provided row pointers and stores the result in nnz_to_get_form_prow.
+ *
+ * @param n The number of rows in the matrix.
+ * @param to_get_form_prow Pointer to the array that indicates which rows to get.
+ * @param row Pointer to the row pointers of the sparse matrix.
+ * @param nnz_to_get_form_prow Pointer to the output array where the NNZ counts will be stored.
+ */
 __global__ void _getNNZ(itype n, const itype* __restrict__ to_get_form_prow, const itype* __restrict__ row, itype* nnz_to_get_form_prow)
 {
     itype i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -29,6 +40,17 @@ __global__ void _getNNZ(itype n, const itype* __restrict__ to_get_form_prow, con
     nnz_to_get_form_prow[i] = row[j + 1] - row[j];
 }
 
+/**
+ * @brief Performs a binary search on a sorted array.
+ *
+ * This function finds the index of the first element in the array that is greater than
+ * the specified value.
+ *
+ * @param array Pointer to the sorted array.
+ * @param size The size of the array.
+ * @param value The value to search for.
+ * @return int The index of the first element greater than the value.
+ */
 __forceinline__
     __device__ int
     binsearch(const itype array[], itype size, itype value)
@@ -47,6 +69,23 @@ __forceinline__
     return low;
 }
 
+/**
+ * @brief Fills the row pointers for a sparse matrix based on received data.
+ *
+ * This kernel populates the row pointers for a sparse matrix based on the received
+ * data and local information.
+ *
+ * @param n The number of rows in the matrix.
+ * @param rows2bereceived The number of rows to be received.
+ * @param whichproc Pointer to the array indicating which process owns each row.
+ * @param p_nnz_map Pointer to the array mapping rows to their non-zero counts.
+ * @param mypfirstrow The first row owned by the current process.
+ * @param myplastrow The last row owned by the current process.
+ * @param nzz_pre_local The number of non-zero elements before local rows.
+ * @param Plocalnnz The number of non-zero elements in the local matrix.
+ * @param local_row Pointer to the local row pointers.
+ * @param row Pointer to the output row pointers.
+ */
 __global__ void _fillPRow(itype n, itype rows2bereceived, const itype* __restrict__ whichproc, itype* p_nnz_map,
     itype mypfirstrow, itype myplastrow, itype nzz_pre_local, itype Plocalnnz, const itype* __restrict__ local_row, itype* row)
 {
@@ -79,6 +118,19 @@ __global__ void _fillPRow(itype n, itype rows2bereceived, const itype* __restric
     }
 }
 
+/**
+ * @brief Fills the row pointers for a sparse matrix without communication.
+ *
+ * This kernel populates the row pointers for a sparse matrix based on local data
+ * without any inter-process communication.
+ *
+ * @param n The number of rows in the matrix.
+ * @param mypfirstrow The first row owned by the current process.
+ * @param myplastrow The last row owned by the current process.
+ * @param Plocalnnz The number of non-zero elements in the local matrix.
+ * @param local_row Pointer to the local row pointers.
+ * @param row Pointer to the output row pointers.
+ */
 __global__ void _fillPRowNoComm(itype n, itype mypfirstrow, itype myplastrow, itype Plocalnnz, const itype* __restrict__ local_row, itype* row)
 {
     itype i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -92,6 +144,18 @@ __global__ void _fillPRowNoComm(itype n, itype mypfirstrow, itype myplastrow, it
     row[i] = Plocalnnz * (i > myplastrow);
 }
 
+/**
+ * @brief Marks columns that are missing from the local process.
+ *
+ * This kernel updates a mask to indicate which columns are missing from the local
+ * process based on the column indices.
+ *
+ * @param nnz The number of non-zero elements in the matrix.
+ * @param mypfirstrow The first row owned by the current process.
+ * @param myplastrow The last row owned by the current process.
+ * @param col Pointer to the column indices of the non-zero elements.
+ * @param mask Pointer to the mask array that will be updated.
+ */
 __global__ void _getColMissingMap(itype nnz, itype mypfirstrow, itype myplastrow, itype* col, int* mask)
 {
     itype tid = blockDim.x * blockIdx.x + threadIdx.x;
@@ -108,6 +172,22 @@ __global__ void _getColMissingMap(itype nnz, itype mypfirstrow, itype myplastrow
     }
 }
 
+/**
+ * @brief Retrieves column values and indices for a given row.
+ *
+ * This kernel retrieves the column indices and values for a specified row and
+ * stores them in the provided output arrays.
+ *
+ * @param n The number of rows to process.
+ * @param rcvprow Pointer to the array of row indices to receive.
+ * @param nnz_per_row Pointer to the array of non-zero counts per row.
+ * @param row Pointer to the row pointers of the sparse matrix.
+ * @param col Pointer to the column indices of the non-zero elements.
+ * @param val Pointer to the values of the non-zero elements.
+ * @param col2get Pointer to the output array for column indices.
+ * @param val2get Pointer to the output array for values.
+ * @param row_shift The shift to apply to the row index.
+ */
 __global__ void _getColVal(itype n, itype* rcvprow, itype* nnz_per_row, const itype* __restrict__ row,
     const itype* __restrict__ col, const vtype* __restrict__ val, itype* col2get, vtype* val2get, itype row_shift)
 {
@@ -124,6 +204,18 @@ __global__ void _getColVal(itype n, itype* rcvprow, itype* nnz_per_row, const it
     }
 }
 
+/**
+ * @brief Merges two sorted arrays into a third array.
+ *
+ * This function merges two sorted arrays into a single sorted array, removing duplicates.
+ *
+ * @param a Pointer to the first sorted array.
+ * @param b Pointer to the second sorted array.
+ * @param c Pointer to the output array where the merged result will be stored.
+ * @param n1 * The size of the first array.
+ * @param n2 The size of the second array.
+ * @return itype The size of the merged array.
+ */
 itype merge(itype a[], itype b[], itype c[], itype n1, itype n2)
 {
     itype i, j, k;
@@ -163,25 +255,21 @@ itype merge(itype a[], itype b[], itype c[], itype n1, itype n2)
     return k;
 }
 
-int bswhichprocess(gsstype* P_n_per_process, int nprocs, gsstype e)
-{
-    unsigned int low, high, medium;
-    low = 0;
-    high = nprocs;
-    while (low < high) {
-        medium = (high + low) / 2;
-        if (e > P_n_per_process[medium]) {
-            low = medium + 1;
-        } else {
-            high = medium;
-        }
-    }
-    return low;
-}
-
 int dumpP = 0;
 extern char idstring[];
 
+/**
+ * @brief Main function for sparse matrix multiplication using GPU.
+ *
+ * This function performs sparse matrix multiplication on the GPU, handling
+ * communication between processes and managing memory allocation.
+ *
+ * @param Alocal Pointer to the local sparse matrix.
+ * @param Pfull Pointer to the full sparse matrix.
+ * @param Plocal Pointer to the local information of the sparse matrix.
+ * @param used_by_solver A boolean indicating if the result is used by a solver.
+ * @return CSR* Pointer to the resulting sparse matrix after multiplication.
+ */
 CSR* nsparseMGPU(CSR* Alocal, CSR* Pfull, csrlocinfo* Plocal, bool used_by_solver)
 {
     _MPI_ENV;
@@ -225,17 +313,24 @@ CSR* nsparseMGPU(CSR* Alocal, CSR* Pfull, csrlocinfo* Plocal, bool used_by_solve
     }
 
     CSR* C = CSRm::init(mat_c.M, Pfull->m, mat_c.nnz, false, true, false, Alocal->full_n, Alocal->row_shift);
-
     C->row = mat_c.d_rpt;
     C->col = mat_c.d_col;
     C->val = mat_c.d_val;
-    // ------------- custom cudaMalloc -------------
     C->custom_alloced = true;
-    // ---------------------------------------------
 
     return C;
 }
 
+/**
+ * @brief Retrieves missing columns from a sparse matrix.
+ *
+ * This function identifies and returns the columns that are missing from the local
+ * sparse matrix.
+ *
+ * @param Alocal Pointer to the local sparse matrix.
+ * @param Plocal Pointer to the local information of the sparse matrix.
+ * @return vector<int>* Pointer to a vector containing the missing column indices.
+ */
 vector<int>* get_missing_col(CSR* Alocal, CSR* Plocal)
 {
     _MPI_ENV;
@@ -269,6 +364,15 @@ vector<int>* get_missing_col(CSR* Alocal, CSR* Plocal)
     }
 }
 
+/**
+ * @brief Retrieves and shrinks the columns of a sparse matrix.
+ *
+ * This function identifies and returns the shrunk columns from the local sparse matrix.
+ *
+ * @param Alocal Pointer to the local sparse matrix.
+ * @param Plocal Pointer to the local information of the sparse matrix.
+ * @return vector<int>* Pointer to a vector containing the shrunk column indices.
+ */
 vector<int>* get_shrinked_col(CSR* Alocal, CSR* Plocal)
 {
     _MPI_ENV;
@@ -331,10 +435,18 @@ vector<int>* get_shrinked_col(CSR* Alocal, stype firstlocal, stype lastlocal)
     return _bitcol;
 }
 
+/**
+ * @brief Computes the rows to receive from other processes.
+ *
+ * This function calculates which rows need to be received from other processes
+ * based on the local sparse matrix and the information about missing columns.
+ *
+ * @param Alocal Pointer to the local sparse matrix.
+ * @param Plocal Pointer to the local information of the sparse matrix.
+ * @param _bitcol Pointer to the vector containing missing column indices.
+ */
 void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<int>* _bitcol)
 {
-    PUSH_RANGE(__func__, 6)
-
     _MPI_ENV;
     static int cnt = 0;
 
@@ -342,12 +454,11 @@ void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<int>* _bitcol)
         return;
     }
 
-    Alocal->rows_to_get = (rows_to_get_info*)Malloc(sizeof(rows_to_get_info));
+    Alocal->rows_to_get = MALLOC(rows_to_get_info, 1, true);
 
     gstype row_shift[nprocs], ends[nprocs];
 
-    itype* P_n_per_process;
-    P_n_per_process = (itype*)Malloc(sizeof(itype) * nprocs);
+    itype* P_n_per_process = MALLOC(itype, nprocs);
 
     // send rows numbers to each process, Plocal->n local number of rows
     if (Plocal != NULL) {
@@ -371,14 +482,14 @@ void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<int>* _bitcol)
     int *displr, *displs, *scounts, *rcounts2, *scounts2, *displr2, *displs2;
     int rcounts[nprocs];
     unsigned int* rcvcntp;
-    displr = (int*)Malloc(sizeof(int) * nprocs);
-    rcounts2 = (int*)Malloc(sizeof(int) * nprocs);
-    scounts2 = (int*)Malloc(sizeof(int) * nprocs);
-    displs2 = (int*)Malloc(sizeof(int) * nprocs);
-    displr2 = (int*)Malloc(sizeof(int) * nprocs);
-    displs = (int*)Malloc(sizeof(int) * nprocs);
-    scounts = (int*)Malloc(sizeof(int) * nprocs);
-    rcvcntp = (unsigned int*)Malloc(sizeof(unsigned int) * nprocs);
+    displr = MALLOC(int, nprocs);
+    rcounts2 = MALLOC(int, nprocs);
+    scounts2 = MALLOC(int, nprocs);
+    displs2 = MALLOC(int, nprocs);
+    displr2 = MALLOC(int, nprocs);
+    displs = MALLOC(int, nprocs);
+    scounts = MALLOC(int, nprocs);
+    rcvcntp = MALLOC(unsigned int, nprocs);
 
     unsigned int countp[nprocs], offset[nprocs];
     unsigned int sothercol = 0;
@@ -395,7 +506,7 @@ void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<int>* _bitcol)
         countp[i] = 0;
     }
 
-    itype* aofwhichproc = (itype*)Malloc(sizeof(itype) * cntothercol);
+    itype* aofwhichproc = MALLOC(itype, cntothercol);
 
     gsstype cum_p_n_per_process[nprocs];
     ends[0] = P_n_per_process[0];
@@ -435,9 +546,9 @@ void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<int>* _bitcol)
     }
     countp[nprocs - 1] = 0;
     if (countall > 0) {
-        whichprow = (itype*)Malloc(sizeof(itype) * countall);
-        Alocal->rows_to_get->whichprow = (gstype*)Malloc(sizeof(gstype) * countall);
-        rcvpcolxrow = (itype*)Malloc(sizeof(itype) * countall);
+        whichprow = MALLOC(itype, countall);
+        Alocal->rows_to_get->whichprow = MALLOC(gstype, countall);
+        rcvpcolxrow = MALLOC(itype, countall);
     }
 
     Alocal->rows_to_get->rows2bereceived = countall;
@@ -447,7 +558,7 @@ void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<int>* _bitcol)
         whichprow[offset[whichproc] + countp[whichproc]] = othercol[sothercol][j] + (Alocal->row_shift - row_shift[whichproc]);
         countp[whichproc]++;
     }
-    free(aofwhichproc);
+    FREE(aofwhichproc);
 
     if (countp[myid] != 0) {
         fprintf(stderr, "self countp should be zero! %d\n", myid);
@@ -486,7 +597,7 @@ void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<int>* _bitcol)
         }
 
         if (countall > 0) {
-            rcvprow = (itype*)Malloc(sizeof(itype) * countall);
+            rcvprow = MALLOC(itype, countall);
         }
 
         if (MPI_Alltoallv(whichprow, scounts, displs, MPI_BYTE, rcvprow, rcounts, displr, MPI_BYTE, MPI_COMM_WORLD) != MPI_SUCCESS) {
@@ -502,7 +613,7 @@ void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<int>* _bitcol)
             k++;
         }
     }
-    free(whichprow);
+    FREE(whichprow);
 #endif
     memset(scounts, 0, nprocs * sizeof(int));
     memset(displs, 0, nprocs * sizeof(int));
@@ -533,13 +644,11 @@ void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<int>* _bitcol)
             displs[i] = ((i == 0) ? 0 : (displs[i - 1] + scounts[i - 1]));
         }
     }
-    // Alocal->rows_to_get->total_row_to_rec = total_row_to_rec;
     Alocal->rows_to_get->nnz_per_row_shift = nnz_per_row_shift;
-    Alocal->rows_to_get->countall = countall /* Alocal->hi.to_receive_n */;
+    Alocal->rows_to_get->countall = countall;
 
     if (Alocal->halo.init == true && 0) {
         Alocal->rows_to_get->rcvprow = Alocal->halo.to_send->val;
-        /*     Alocal->rows_to_get->whichprow = Alocal->halo.to_receive->val; */
     } else {
         Alocal->rows_to_get->rcvprow = rcvprow;
     }
@@ -553,13 +662,20 @@ void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<int>* _bitcol)
     Alocal->rows_to_get->displr2 = displr2;
     Alocal->rows_to_get->rcvcntp = rcvcntp;
     Alocal->rows_to_get->P_n_per_process = P_n_per_process;
-
     cnt++;
 
-    POP_RANGE
     return;
 }
 
+/**
+ * @brief Initializes the completed rows for a sparse matrix.
+ *
+ * This kernel initializes the completed rows for a sparse matrix based on the
+ * number of completed rows.
+ *
+ * @param completedP_n The number of completed rows.
+ * @param new_rows Pointer to the output array where the new row indices will be stored.
+ */
 __global__ void _completedP_rows(itype completedP_n, itype* new_rows)
 {
     int id = blockDim.x * blockIdx.x + threadIdx.x;
@@ -569,6 +685,21 @@ __global__ void _completedP_rows(itype completedP_n, itype* new_rows)
     }
 }
 
+/**
+ * @brief Initializes the completed rows for a sparse matrix with local information.
+ *
+ * This kernel initializes the completed rows for a sparse matrix based on the
+ * number of completed rows and local non-zero counts.
+ *
+ * @param completedP_n The number of completed rows.
+ * @param rows_pre_local The number of rows that are pre-local.
+ * @param local_rows The number of local rows.
+ * @param nzz_pre_local The number of non-zero elements before local rows.
+ * @param Plocal_nnz The number of non-zero elements in the local matrix.
+ * @param Plocal_row Pointer to the local row pointers.
+ * @param P_nnz_map Pointer to the mapping of rows to their non-zero counts.
+ * @param completedP_row Pointer to the output array where the completed row indices will be stored.
+ */
 __global__ void _completedP_rows2(itype completedP_n, itype rows_pre_local, itype local_rows, itype nzz_pre_local, itype Plocal_nnz, itype* Plocal_row, itype* P_nnz_map, itype* completedP_row)
 {
     itype id = blockDim.x * blockIdx.x + threadIdx.x;
@@ -586,10 +717,20 @@ __global__ void _completedP_rows2(itype completedP_n, itype rows_pre_local, ityp
     }
 }
 
+/**
+ * @brief Main function for sparse matrix multiplication without communication.
+ *
+ * This function performs sparse matrix multiplication on the GPU without
+ * inter-process communication, handling local data only.
+ *
+ * @param h Pointer to the handles for managing GPU resources.
+ * @param Alocal Pointer to the local sparse matrix.
+ * @param Plocal Pointer to the local information of the sparse matrix.
+ * @param used_by_solver A boolean indicating if the result is used by a solver.
+ * @return CSR* Pointer to the resulting sparse matrix after multiplication.
+ */
 CSR* nsparseMGPU_noCommu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_solver)
 {
-    PUSH_RANGE(__func__, 6)
-
     _MPI_ENV;
 
     CSR* Alocal_ = get_shrinked_matrix(Alocal, Plocal);
@@ -609,16 +750,25 @@ CSR* nsparseMGPU_noCommu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_
     Alocal_->col = NULL;
     Alocal_->row = NULL;
     Alocal_->val = NULL;
-    std::free(Alocal_);
+    FREE(Alocal_);
 
-    POP_RANGE
     return C;
 }
 
+/**
+ * @brief Main function for sparse matrix multiplication with communication.
+ *
+ * This function performs sparse matrix multiplication on the GPU, handling
+ * communication between processes and managing memory allocation.
+ *
+ * @param h Pointer to the handles for managing GPU resources.
+ * @param Alocal Pointer to the local sparse matrix.
+ * @param Plocal Pointer to the local information of the sparse matrix.
+ * @param used_by_solver A boolean indicating if the result is used by a solver.
+ * @return CSR* Pointer to the resulting sparse matrix after multiplication.
+ */
 CSR* nsparseMGPU_commu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_solver)
 {
-    PUSH_RANGE(__func__, 6)
-
     _MPI_ENV;
 
     csrlocinfo Pinfo1p;
@@ -700,14 +850,12 @@ CSR* nsparseMGPU_commu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_so
             dev_nnz_per_row_shift->val = idevtemp2;
 
             CHECK_DEVICE(cudaMemcpyAsync(dev_nnz_per_row_shift->val, nnz_per_row_shift->val, dev_nnz_per_row_shift->n * sizeof(itype), cudaMemcpyHostToDevice, h->stream1));
-            // ---------------------------------- TEST --------------------------------------------------
             if (dev_nnz_per_row_shift->n > nnz_per_row_shift_n_stat) {
                 if (nnz_per_row_shift_n_stat > 0) {
-                    MY_CUDA_CHECK(cudaFree(dev_rcvprow_stat));
+                    CUDA_FREE(dev_rcvprow_stat);
                 }
                 nnz_per_row_shift_n_stat = dev_nnz_per_row_shift->n;
-                cudaMalloc_CNT
-                    CHECK_DEVICE(cudaMalloc((void**)&dev_rcvprow_stat, nnz_per_row_shift_n_stat * sizeof(itype)));
+                dev_rcvprow_stat = CUDA_MALLOC(itype, nnz_per_row_shift_n_stat, true);
             }
             CHECK_DEVICE(cudaMemcpyAsync(dev_rcvprow_stat, rcvprow, dev_nnz_per_row_shift->n * sizeof(itype), cudaMemcpyHostToDevice, h->stream1));
             // ------------------------------------------------------------------------------------------
@@ -737,7 +885,7 @@ CSR* nsparseMGPU_commu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_so
 
         if (nnz_per_row_shift->n > 0) {
             dev_nnz_per_row_shift->val = NULL;
-            std::free(dev_nnz_per_row_shift);
+            FREE(dev_nnz_per_row_shift);
         }
     }
 
@@ -750,8 +898,6 @@ CSR* nsparseMGPU_commu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_so
     itype rows2bereceived = Alocal->rows_to_get->rows2bereceived;
 
     if (rows2bereceived) {
-        // we have rows from other process
-        bool flag = true;
         gsstype r = 0;
 
         vector<itype>* P_nnz_map = Vector::init<itype>(rows2bereceived, true, false);
@@ -780,7 +926,6 @@ CSR* nsparseMGPU_commu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_so
             rcounts[whichproc] += rcvpcolxrow[i];
             if (r < mypfirstrow) {
                 nzz_pre_local += rcvpcolxrow[i];
-                flag = false;
             }
             k += rcvpcolxrow[i];
             P_nnz_map->val[i] = k;
@@ -832,17 +977,15 @@ CSR* nsparseMGPU_commu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_so
         previous_index = i;
     }
     if (iPtemp1 == NULL && totcell > 0) { // first allocation
-        cudaMalloc_CNT
-            MY_CUDA_CHECK(cudaMallocHost(&iPtemp1, totcell * sizeof(itype)));
-        vPtemp1 = (vtype*)Malloc(totcell * sizeof(vtype));
+        iPtemp1 = CUDA_MALLOC_HOST(itype, totcell, true);
+        vPtemp1 = MALLOC(vtype, totcell, true);
         s_totcell_new = totcell;
     }
     if (totcell > s_totcell_new) { // not enough space
-        MY_CUDA_CHECK(cudaFreeHost(iPtemp1));
+        CUDA_FREE_HOST(iPtemp1);
         printf("[Realloc] --- totcell: %d s_totcell_new: %d\n", totcell, s_totcell_new);
-        cudaMalloc_CNT
-            MY_CUDA_CHECK(cudaMallocHost(&iPtemp1, sizeof(itype) * totcell));
-        vPtemp1 = (vtype*)Realloc(vPtemp1, totcell * sizeof(vtype));
+        iPtemp1 = CUDA_MALLOC_HOST(itype, totcell, true);
+        vPtemp1 = REALLOC(vtype, vPtemp1, s_totcell_new, totcell);
         s_totcell_new = totcell;
     }
     Pcol = iPtemp1;
@@ -865,31 +1008,22 @@ CSR* nsparseMGPU_commu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_so
 
     completedP = CSRm::init(completedP_n, Pm, completedP_nnz, false, true, false, completedP_n, Alocal->row_shift);
     if (completedP_n > completedP_stat_n || completedP_nnz > completedP_stat_nnz) {
-        cudaError_t err;
+        // cudaError_t err;
         if (completedP_n > completedP_stat_n) {
             if (completedP_stat_n > 0) {
-                MY_CUDA_CHECK(cudaFree(completedP_stat_row));
+                CUDA_FREE(completedP_stat_row);
             }
             completedP_stat_n = completedP_n;
-            cudaMalloc_CNT
-                err
-                = cudaMalloc((void**)&completedP_stat_row, (completedP_stat_n + 1) * sizeof(itype));
-            CHECK_DEVICE(err);
+            completedP_stat_row = CUDA_MALLOC(itype, completedP_stat_n + 1, true);
         }
         if (completedP_nnz > completedP_stat_nnz) {
             if (completedP_stat_nnz > 0) {
-                MY_CUDA_CHECK(cudaFree(completedP_stat_col));
-                MY_CUDA_CHECK(cudaFree(completedP_stat_val));
+                CUDA_FREE(completedP_stat_col);
+                CUDA_FREE(completedP_stat_val);
             }
             completedP_stat_nnz = completedP_nnz;
-            cudaMalloc_CNT
-                err
-                = cudaMalloc((void**)&completedP_stat_val, completedP_stat_nnz * sizeof(vtype));
-            CHECK_DEVICE(err);
-            cudaMalloc_CNT
-                err
-                = cudaMalloc((void**)&completedP_stat_col, completedP_stat_nnz * sizeof(itype));
-            CHECK_DEVICE(err);
+            completedP_stat_val = CUDA_MALLOC(vtype, completedP_stat_nnz, true);
+            completedP_stat_col = CUDA_MALLOC(itype, completedP_stat_nnz, true);
         }
     }
     completedP->val = completedP_stat_val;
@@ -955,7 +1089,7 @@ CSR* nsparseMGPU_commu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_so
 
     cudaDeviceSynchronize();
     if (Alocal_->m != completedP->n) {
-        fprintf(stderr, "[%d] Alocal_->m = %d != %d = completedP->n (totcell = %d, Plocal->n = %d, countall = %d, rows2berecived = %d, nzz_pre_local=%d)\n", myid, Alocal_->m, completedP->n, totcell, Plocal->n, countall, Alocal->rows_to_get->rows2bereceived, nzz_pre_local);
+        fprintf(stderr, "[%d] Alocal_->m = %lu != %d = completedP->n (totcell = %d, Plocal->n = %d, countall = %d, rows2berecived = %d, nzz_pre_local=%d)\n", myid, Alocal_->m, completedP->n, totcell, Plocal->n, countall, Alocal->rows_to_get->rows2bereceived, nzz_pre_local);
     }
     assert(Alocal_->m == completedP->n);
 
@@ -964,18 +1098,49 @@ CSR* nsparseMGPU_commu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_so
     Pcol = NULL;
     Pval = NULL; // memory will free up in AMG
     CSRm::free_rows_to_get(Alocal);
-
-    // --------------- TEST ----------------------
-    std::free(completedP);
-    // -------------------------------------------
+    FREE(completedP);
 
     Alocal_->col = NULL;
     Alocal_->row = NULL;
     Alocal_->val = NULL;
-    std::free(Alocal_);
+    FREE(Alocal_);
 
     cnt++;
 
-    POP_RANGE
     return C;
+}
+
+/**
+ * @brief Performs sparse matrix multiplication.
+ *
+ * This function orchestrates the sparse matrix multiplication process, handling
+ * memory allocation and communication between processes.
+ *
+ * @param Alocal Pointer to the local sparse matrix.
+ * @param Plocal Pointer to the local information of the sparse matrix.
+ * @param mem_alloc_size The size of memory to allocate for temporary storage.
+ * @return CSR* Pointer to the resulting sparse matrix after multiplication.
+ */
+CSR* SpMM(CSR* Alocal, CSR* Plocal, int mem_alloc_size)
+{
+    _MPI_ENV;
+    handles* h = Handles::init();
+
+    iPtemp1 = NULL;
+    vPtemp1 = NULL;
+    iAtemp1 = CUDA_MALLOC_HOST(itype, mem_alloc_size, true);
+    vAtemp1 = CUDA_MALLOC_HOST(vtype, mem_alloc_size, true);
+    idevtemp1 = CUDA_MALLOC(itype, mem_alloc_size, true);
+    vdevtemp1 = CUDA_MALLOC(vtype, mem_alloc_size, true);
+    idevtemp2 = CUDA_MALLOC(itype, mem_alloc_size, true);
+
+    if (nprocs != 1) {
+        vector<int>* _bitcol = get_missing_col(Alocal, NULL);
+        compute_rows_to_rcv_CPU(Alocal, NULL, _bitcol);
+        Vector::free(_bitcol);
+    }
+
+    CSR* APlocal = nsparseMGPU_commu_new(h, Alocal, Plocal, false);
+
+    return APlocal;
 }

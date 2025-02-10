@@ -1,20 +1,29 @@
-#include "basic_kernel/halo_communication/halo_communication.h"
 #include "datastruct/vector.h"
+#include "halo_communication/halo_communication.h"
+#include "op/addAbsoluteRowSumNoDiag.h"
+#include "op/mydiag.h"
 #include "preconditioner/bcmg/GAMG_cycle.h"
 #include "preconditioner/l1jacobi/l1jacobi.h"
 #include "utility/distribuite.h"
-#include "utility/function_cnt.h"
-#include "utility/metrics.h"
-#include "utility/timing.h"
+#include "utility/globals.h"
+#include "utility/profiling.h"
 #include <stdlib.h>
+
+#define VERBOSE 0
+#define USE_M 1
+
+#define DEBUG_GAMG_CYCLE 0
+#if DEBUG_GAMG_CYCLE
+int gamg_counter = 0;
+#endif
+
+// =============================================================================
 
 vector<vtype>* GAMGcycle::Res_buffer;
 
 void GAMGcycle::initContext(int n)
 {
-    Vectorinit_CNT
-        GAMGcycle::Res_buffer
-        = Vector::init<vtype>(n, true, true);
+    GAMGcycle::Res_buffer = Vector::init<vtype>(n, true, true);
 }
 
 __inline__ void GAMGcycle::setBufferSize(itype n)
@@ -30,17 +39,7 @@ void GAMGcycle::freeContext()
 int cntrelax = 0;
 extern char idstring[];
 
-void my_relax(handles* h, int niter, CSR* A, vector<vtype>* rhs, vector<vtype>* Xtent, vector<vtype>* D)
-{
-    vector<vtype>* rcopy_loc = Vector::init<vtype>(A->n, true, true);
-    vector<vtype>* w_loc = Vector::init<vtype>(A->n, true, true);
-    for (int i = 0; i < niter; i++) {
-        // ui+1 = ui +D^-1(r-A*ui)
-        l1jacobi_iter(h, A, rhs, Xtent, D, rcopy_loc, w_loc);
-    }
-    Vector::free(rcopy_loc);
-    Vector::free(w_loc);
-}
+// =============================================================================
 
 // HIGHLY INEFFICIENT
 bool check_same_file_content(const std::string& f1, const std::string& f2)
@@ -59,17 +58,12 @@ bool check_same_file_content(const std::string& f1, const std::string& f2)
 void GAMG_cycle(handles* h, int k, bootBuildData* bootamg_data, boot* boot_amg, applyData* amg_cycle, vectorCollection<vtype>* Rhs, vectorCollection<vtype>* Xtent, vectorCollection<vtype>* Xtent_2, int l /*, int coarsesolver_type*/)
 {
     _MPI_ENV;
-    static int flow = 1;
-    static int first = 0;
 
     hierarchy* hrrc = boot_amg->H_array[k];
 
     if (VERBOSE > 0) {
-        std::cout << "GAMGCycle: start of level " << l << " Max level " << hrrc->num_levels << "\n";
+        std::cout << "P" << myid << ": " << "GAMGCycle: start of level " << l << " Max level " << hrrc->num_levels << "\n";
     }
-
-    char filename[256];
-    FILE* fp;
 
     // -------------------------------------------------------------------------
     // l ==  hrrc->num_levels means we are at the coarsest level, hence
@@ -78,145 +72,114 @@ void GAMG_cycle(handles* h, int k, bootBuildData* bootamg_data, boot* boot_amg, 
     // -------------------------------------------------------------------------
     // TODO: support multiple solvers
     if (l == hrrc->num_levels) {
-
-#if DETAILED_TIMING
-        if (ISMASTER) {
-            TIME::start();
+        if (VERBOSE > 1) {
+            vtype tnrm = Vector::norm(h->cublas_h, Xtent->val[l - 1]);
+            std::cout << "P" << myid << ": " << "Before coarsest level " << l << " XTent " << tnrm << "\n";
         }
+
+        // BEGIN_DETAILED_TIMING(PREC_APPLY, SOLRELAX);
+#if USE_M
+        l1jacobi_iter(h, amg_cycle->relaxnumber_coarse, hrrc->A_array[l - 1], hrrc->M_array[l - 1], Rhs->val[l - 1], Xtent->val[l - 1], &Xtent_2->val[l - 1]);
+#else
+        l1jacobi_iter(h, amg_cycle->relaxnumber_coarse, hrrc->A_array[l - 1], hrrc->D_array[l - 1], Rhs->val[l - 1], Xtent->val[l - 1], &Xtent_2->val[l - 1]);
 #endif
+        // END_DETAILED_TIMING(PREC_APPLY, SOLRELAX);
 
-        my_relax(h, amg_cycle->relaxnumber_coarse, hrrc->A_array[l - 1], Rhs->val[l - 1], Xtent->val[l - 1], hrrc->D_array[l - 1]);
-
-#if DETAILED_TIMING
-        if (ISMASTER) {
-            TOTAL_SOLRELAX_TIME += TIME::stop();
+        if (VERBOSE > 1) {
+            vtype tnrm = Vector::norm(h->cublas_h, Xtent->val[l - 1]);
+            std::cout << "P" << myid << ": " << "After coarsest level " << l << " XTent " << tnrm << "\n";
         }
-#endif
-
     }
     // -------------------------------------------------------------------------
     // l != hrrc->num_levels, means we are at an intermediate level, hence
     // we have to solve the system recursively.
     // -------------------------------------------------------------------------
     else {
+        // fprintf(stdout, "l != hrrc->num_levels\n");
 
         // ---------------------------------------------------------------------
         // PRE-SMOOTHING (begin)
         // ---------------------------------------------------------------------
 
         if (VERBOSE > 1) {
-            vtype tnrm = Vector::norm(h->cublas_h, Xtent->val[l - 1]);
-            std::cout << "Before pre smoothing at level " << l << " XTent " << tnrm << "\n";
+            vtype tnrm = Vector::norm(h->cublas_h, Rhs->val[l - 1]);
+            fprintf(stdout, "P%d: Before pre smoothing at level %d Rhs %lf\n", myid, l, tnrm);
+
+            tnrm = Vector::norm(h->cublas_h, Xtent->val[l - 1]);
+            fprintf(stdout, "P%d: Before pre smoothing at level %d Xtent %lf\n", myid, l, tnrm);
+
+            tnrm = Vector::norm(h->cublas_h, hrrc->M_array[l - 1]);
+            fprintf(stdout, "P%d: Before pre smoothing at level %d M %lf\n", myid, l, tnrm);
         }
 
-#if DETAILED_TIMING
-        if (ISMASTER) {
-            TIME::start();
-        }
-#endif
+        int prerelax_coeff = amg_cycle->cycle_type == CycleType::VARIABLE_V_CYCLE
+            ? (1 << (l - 1))
+            : 1;
 
         // pre_smoothing
-        my_relax(h, amg_cycle->prerelax_number, hrrc->A_array[l - 1], Rhs->val[l - 1], Xtent->val[l - 1], hrrc->D_array[l - 1]);
+        // BEGIN_DETAILED_TIMING(PREC_APPLY, SOLRELAX);
+#if USE_M
+        l1jacobi_iter(h, amg_cycle->prerelax_number * prerelax_coeff, hrrc->A_array[l - 1], hrrc->M_array[l - 1], Rhs->val[l - 1], Xtent->val[l - 1], &Xtent_2->val[l - 1]);
+#else
+        l1jacobi_iter(h, amg_cycle->prerelax_number * prerelax_coeff, hrrc->A_array[l - 1], hrrc->D_array[l - 1], Rhs->val[l - 1], Xtent->val[l - 1], &Xtent_2->val[l - 1]);
+#endif
+        // END_DETAILED_TIMING(PREC_APPLY, SOLRELAX);
 
-#if DETAILED_TIMING
-        if (ISMASTER) {
-            TOTAL_SOLRELAX_TIME += TIME::stop();
-        }
+#if DEBUG_GAMG_CYCLE
+        dump(Xtent->val[l - 1], "%s/%s_%04d_%04d_%s_Xtent_p%d%s.txt",
+            output_dir.c_str(), output_prefix.c_str(),
+            gamg_counter, __LINE__, __func__,
+            myid, output_suffix.c_str());
+        gamg_counter++;
 #endif
 
         if (VERBOSE > 1) {
             vtype tnrm = Vector::norm(h->cublas_h, Xtent->val[l - 1]);
-            std::cout << "After pre smoothing at level " << l << " XTent " << tnrm << "\n";
+            fprintf(stdout, "P%d: After pre smoothing at level %d Xtent %lf\n", myid, l, tnrm);
+            tnrm = Vector::norm(h->cublas_h, Rhs->val[l - 1]);
+            fprintf(stdout, "P%d: After pre smoothing at level %d Rhs %lf\n", myid, l, tnrm);
         }
 
         // ---------------------------------------------------------------------
         // PRE-SMOOTHING (end)
         // ---------------------------------------------------------------------
 
-// compute residual
-#if DETAILED_TIMING
-        if (ISMASTER) {
-            TIME::start();
-        }
-#endif
+        // compute residual
+        // BEGIN_DETAILED_TIMING(PREC_APPLY, RESTGAMG);
 
         GAMGcycle::setBufferSize(Rhs->val[l - 1]->n);
         vector<vtype>* Res = GAMGcycle::Res_buffer;
-        Vector::copyTo(Res, Rhs->val[l - 1]);
+
+        // BEGIN_DETAILED_TIMING(PREC_APPLY, VECTOR_COPY);
+        Vector::copyTo(Res, Rhs->val[l - 1], (nprocs > 1) ? *(hrrc->A_array[l - 1]->os.streams->comm_stream) : 0);
+        // END_DETAILED_TIMING(PREC_APPLY, VECTOR_COPY);
 
         CSRm::CSRVector_product_adaptive_miniwarp_witho(hrrc->A_array[l - 1], Xtent->val[l - 1], Res, -1., 1.);
-        cudaDeviceSynchronize();
+
+        if (VERBOSE > 1) {
+            vtype tnrm = Vector::norm_MPI(h->cublas_h, Res);
+            // std::cout << "Residual at level " << l << " " << tnrm << "\n";
+            fprintf(stdout, "P%d: Residual at level %d: %lf\n", myid, l, tnrm);
+        }
 
         if (nprocs == 1) {
-            if (first == 1 || flow == 0) {
-                snprintf(filename, sizeof(filename), "Rlocal_%d_%s_%d_%d_%d", __LINE__, idstring, amg_cycle->relaxnumber_coarse, flow, myid);
-                CSRm::printMM(hrrc->R_array[l - 1], filename);
-                snprintf(filename, sizeof(filename), "Res_%d_full_%s_%d_%d_%d", __LINE__, idstring, amg_cycle->relaxnumber_coarse, flow, myid);
-                FILE* fp = fopen(filename, "w");
-                if (fp == NULL) {
-                    printf("Could not open %s\n", filename);
-                    exit(1);
-                }
-                Vector::print(Res, -1, fp);
-                fclose(fp);
-            }
-
             CSRm::CSRVector_product_adaptive_miniwarp_witho(hrrc->R_array[l - 1], Res, Rhs->val[l], 1., 0.);
-            cudaDeviceSynchronize();
-
-            if (first == 1 || flow == 0) {
-                snprintf(filename, sizeof(filename), "Rhs2_%d_%s_%d_%d_%d", __LINE__, idstring, amg_cycle->relaxnumber_coarse, flow, myid);
-                fp = fopen(filename, "w");
-                if (fp == NULL) {
-                    printf("Could not open %s\n", filename);
-                    exit(1);
-                }
-                Vector::print(Rhs->val[l], -1, fp);
-                fclose(fp);
-                flow++;
-            }
         } else {
 
             CSR* R_local = hrrc->R_local_array[l - 1];
             assert(hrrc->A_array[l - 1]->full_n == R_local->m);
             vector<vtype>* Res_full = Xtent_2->val[l - 1];
+
+            // BEGIN_DETAILED_TIMING(PREC_APPLY, CUDAMEMCOPY);
             cudaMemcpy(Res_full->val, Res->val, hrrc->A_array[l - 1]->n * sizeof(vtype), cudaMemcpyDeviceToDevice);
-            if (first == 1 || flow == 0) {
-                snprintf(filename, sizeof(filename), "Rlocal_%d_%s_%d_%d_%d", __LINE__, idstring, amg_cycle->relaxnumber_coarse, flow, myid);
-                CSRm::printMM(R_local, filename);
-                snprintf(filename, sizeof(filename), "Res_%d_full_%s_%d_%d_%d", __LINE__, idstring, amg_cycle->relaxnumber_coarse, flow, myid);
-                FILE* fp = fopen(filename, "w");
-                if (fp == NULL) {
-                    printf("Could not open %s\n", filename);
-                    exit(1);
-                }
-                Vector::print(Res_full, -1, fp);
-                fclose(fp);
-            }
+            // END_DETAILED_TIMING(PREC_APPLY, CUDAMEMCOPY);
 
             CSRm::CSRVector_product_adaptive_miniwarp_witho(R_local, Res_full, Rhs->val[l], 1., 0.);
-            cudaDeviceSynchronize();
-
-            if (first == 1 || flow == 0) {
-                snprintf(filename, sizeof(filename), "Rhs2_%d_%s_%d_%d_%d", __LINE__, idstring, amg_cycle->relaxnumber_coarse, flow, myid);
-                fp = fopen(filename, "w");
-                if (fp == NULL) {
-                    printf("Could not open %s\n", filename);
-                    exit(1);
-                }
-                Vector::print(Rhs->val[l], -1, fp);
-                fclose(fp);
-                flow++;
-            }
         }
 
         Vector::fillWithValue(Xtent->val[l], 0.);
 
-#if DETAILED_TIMING
-        if (ISMASTER) {
-            TOTAL_RESTGAMG_TIME += TIME::stop();
-        }
-#endif
+        // END_DETAILED_TIMING(PREC_APPLY, RESTGAMG);
 
         if (hrrc->num_levels > 2 || amg_cycle->relaxnumber_coarse > 0) {
             for (int i = 1; i <= amg_cycle->num_grid_sweeps[l - 1]; i++) {
@@ -227,60 +190,13 @@ void GAMG_cycle(handles* h, int k, bootBuildData* bootamg_data, boot* boot_amg, 
             }
         }
 
-#if DETAILED_TIMING
-        if (ISMASTER) {
-            TIME::start();
-        }
-#endif
-
+        // BEGIN_DETAILED_TIMING_NODEC(PREC_APPLY, RESTGAMG);
         if (nprocs == 1) {
-            if (first == 1 || flow == 0) {
-                snprintf(filename, sizeof(filename), "Plocal_%d_%s_%d_%d_%d", __LINE__, idstring, amg_cycle->relaxnumber_coarse, flow, myid);
-                CSRm::printMM(hrrc->P_array[l - 1], filename);
-                snprintf(filename, sizeof(filename), "Xtent_%d_%s_%d_%d_%d", __LINE__, idstring, amg_cycle->relaxnumber_coarse, flow, myid);
-                FILE* fp = fopen(filename, "w");
-                if (fp == NULL) {
-                    printf("Could not open %s\n", filename);
-                    exit(1);
-                }
-                Vector::print(Xtent->val[l], -1, fp);
-                fclose(fp);
-            }
             CSRm::CSRVector_product_adaptive_miniwarp(hrrc->P_array[l - 1], Xtent->val[l], Xtent->val[l - 1], 1., 1.);
-            if (first == 1 || flow == 0) {
-                snprintf(filename, sizeof(filename), "Xtent_%d_%s_%d_%d_%d", __LINE__, idstring, amg_cycle->relaxnumber_coarse, flow, myid);
-                fp = fopen(filename, "w");
-                if (fp == NULL) {
-                    printf("Could not open %s\n", filename);
-                    exit(1);
-                }
-                Vector::print(Xtent->val[l - 1], -1, fp);
-                fclose(fp);
-                flow++;
-            }
-
         } else {
             CSRm::CSRVector_product_adaptive_miniwarp_witho(hrrc->P_local_array[l - 1], Xtent->val[l], Xtent->val[l - 1], 1., 1.);
-            cudaDeviceSynchronize();
-
-            if (first == 1 || flow == 0) {
-                snprintf(filename, sizeof(filename), "Xtent_%d_%s_%d_%d_%d", __LINE__, idstring, amg_cycle->relaxnumber_coarse, flow, myid);
-                fp = fopen(filename, "w");
-                if (fp == NULL) {
-                    printf("Could not open %s\n", filename);
-                    exit(1);
-                }
-                Vector::print(Xtent->val[l - 1], -1, fp);
-                fclose(fp);
-                flow++;
-            }
         }
-
-#if DETAILED_TIMING
-        if (ISMASTER) {
-            TOTAL_RESTGAMG_TIME += TIME::stop();
-        }
-#endif
+        // END_DETAILED_TIMING(PREC_APPLY, RESTGAMG);
 
         // ---------------------------------------------------------------------
         // POST-SMOOTHING (begin)
@@ -288,36 +204,33 @@ void GAMG_cycle(handles* h, int k, bootBuildData* bootamg_data, boot* boot_amg, 
 
         if (VERBOSE > 1) {
             vtype tnrm = Vector::norm(h->cublas_h, Xtent->val[l - 1]);
-            std::cout << "Before post smoothing at level " << l << " XTent " << tnrm << "\n";
+            std::cout << "P" << myid << ": " << "Before post smoothing at level " << l << " XTent " << tnrm << "\n";
         }
 
-#if DETAILED_TIMING
-        if (ISMASTER) {
-            TIME::start();
-        }
+        int postrelax_coeff = amg_cycle->cycle_type == CycleType::VARIABLE_V_CYCLE
+            ? (1 << (l - 1))
+            : 1;
+
+        // BEGIN_DETAILED_TIMING_NODEC(PREC_APPLY, SOLRELAX);
+#if USE_M
+        l1jacobi_iter(h, amg_cycle->postrelax_number * postrelax_coeff, hrrc->A_array[l - 1], hrrc->M_array[l - 1], Rhs->val[l - 1], Xtent->val[l - 1], &Xtent_2->val[l - 1]);
+#else
+        l1jacobi_iter(h, amg_cycle->postrelax_number * postrelax_coeff, hrrc->A_array[l - 1], hrrc->D_array[l - 1], Rhs->val[l - 1], Xtent->val[l - 1], &Xtent_2->val[l - 1]);
 #endif
-
-        my_relax(h, amg_cycle->postrelax_number, hrrc->A_array[l - 1], Rhs->val[l - 1], Xtent->val[l - 1], hrrc->D_array[l - 1]);
-
-#if DETAILED_TIMING
-        if (ISMASTER) {
-            TOTAL_SOLRELAX_TIME += TIME::stop();
-        }
-#endif
+        // END_DETAILED_TIMING(PREC_APPLY, SOLRELAX);
 
         if (VERBOSE > 1) {
             vtype tnrm = Vector::norm(h->cublas_h, Xtent->val[l - 1]);
-            std::cout << "After post smoothing at level " << l << " XTent " << tnrm << "\n";
+            std::cout << "P" << myid << ": " << "After post smoothing at level " << l << " XTent " << tnrm << "\n";
         }
 
         // ---------------------------------------------------------------------
         // POST-SMOOTHING (end)
         // ---------------------------------------------------------------------
     }
-    first = 0;
 
     if (VERBOSE > 0) {
-        std::cout << "GAMGCycle: end of level " << l << "\n";
+        std::cout << "P" << myid << ": " << "GAMGCycle: end of level " << l << "\n";
     }
     cntrelax = 0;
 }

@@ -1,6 +1,7 @@
 #include "datastruct/CSR.h"
 #include "datastruct/vector.h"
 #include "utility/distribuite.h"
+#include "utility/memory.h"
 #include "utility/utils.h"
 #include <assert.h>
 #include <getopt.h>
@@ -21,16 +22,9 @@ int main(int argc, char** argv)
     vector<vtype>* sol = Vector::init<vtype>(n, true, true);
     Vector::fillWithValue(sol, 1.);
 
-    taskmap = (int*)Malloc(nprocs * sizeof(*taskmap));
-    itaskmap = (int*)Malloc(nprocs * sizeof(*itaskmap));
-    if (taskmap == NULL) {
-        fprintf(stderr, "Could not get %d byte for taskmap\n", nprocs * sizeof(*taskmap));
-        exit(1);
-    }
-    if (itaskmap == NULL) {
-        fprintf(stderr, "Could not get %d byte for itaskmap\n", nprocs * sizeof(*itaskmap));
-        exit(1);
-    }
+    taskmap = MALLOC(int, nprocs);
+    itaskmap = MALLOC(int, nprocs);
+
     for (int i = 0; i < nprocs; i++) {
         taskmap[i] = i;
         itaskmap[i] = i;

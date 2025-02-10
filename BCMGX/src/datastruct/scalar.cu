@@ -1,6 +1,6 @@
 #include "scalar.h"
 
-#include "utility/function_cnt.h"
+#include "utility/memory.h"
 #include "utility/utils.h"
 
 namespace Scalar {
@@ -8,27 +8,18 @@ namespace Scalar {
 template <typename T>
 scalar<T>* init(T val, bool on_the_device)
 {
-    scalar<T>* v = NULL;
     // on the host
-    v = (scalar<T>*)Malloc(sizeof(scalar<T>));
-    CHECK_HOST(v);
-
+    scalar<T>* v = MALLOC(scalar<T>, 1, true);
     v->on_the_device = on_the_device;
 
     if (on_the_device) {
         // on the device
-        cudaError_t err;
-        cudaMalloc_CNT
-            err
-            = cudaMalloc((void**)&v->val, sizeof(T));
-        CHECK_DEVICE(err);
-
-        err = cudaMemcpy(v->val, &val, sizeof(T), cudaMemcpyHostToDevice);
+        v->val = CUDA_MALLOC(T, 1, false);
+        cudaError_t err = cudaMemcpy(v->val, &val, sizeof(T), cudaMemcpyHostToDevice);
         CHECK_DEVICE(err);
     } else {
         // on the host
-        v->val = (T*)Malloc(sizeof(T));
-        CHECK_HOST(v->val);
+        v->val = MALLOC(T, 1, false);
         v->val[0] = val;
     }
     return v;
@@ -37,7 +28,6 @@ scalar<T>* init(T val, bool on_the_device)
 template <typename T>
 scalar<T>* copyToDevice(scalar<T>* v)
 {
-
     assert(!v->on_the_device);
 
     // alocate scalar on the device memory
@@ -52,15 +42,11 @@ scalar<T>* copyToDevice(scalar<T>* v)
 template <typename T>
 scalar<T>* copyToHost(scalar<T>* v_d)
 {
-
     assert(v_d->on_the_device);
 
     // alocate scalar on the host memory
     scalar<T>* v = init<T>(0, false);
-
-    cudaError_t err;
-
-    err = cudaMemcpy(v->val, v_d->val, sizeof(T), cudaMemcpyDeviceToHost);
+    cudaError_t err = cudaMemcpy(v->val, v_d->val, sizeof(T), cudaMemcpyDeviceToHost);
     CHECK_DEVICE(err);
 
     return v;
@@ -69,14 +55,14 @@ scalar<T>* copyToHost(scalar<T>* v_d)
 template <typename T>
 void free(scalar<T>* v)
 {
-    if (v->on_the_device) {
-        cudaError_t err;
-        err = cudaFree(v->val);
-        CHECK_DEVICE(err);
-    } else {
-        std::free(v->val);
+    if (v) {
+        if (v->on_the_device) {
+            CUDA_FREE(v->val);
+        } else {
+            FREE(v->val);
+        }
+        FREE(v);
     }
-    std::free(v);
 }
 
 template <typename T>
@@ -101,16 +87,11 @@ void print(scalar<T>* v)
 template <typename T>
 T* getvalueFromDevice(scalar<T>* v_d)
 {
-
     assert(v_d->on_the_device);
 
     // alocate scalar on the host memory
-    T* v = (int*)Malloc(sizeof(T));
-    CHECK_HOST(v);
-
-    cudaError_t err;
-
-    err = cudaMemcpy(v, v_d->val, sizeof(T), cudaMemcpyDeviceToHost);
+    T* v = MALLOC(int, 1, true);
+    cudaError_t err = cudaMemcpy(v, v_d->val, sizeof(T), cudaMemcpyDeviceToHost);
     CHECK_DEVICE(err);
 
     return v;

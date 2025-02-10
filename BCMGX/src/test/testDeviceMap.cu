@@ -1,5 +1,6 @@
 #include "utility/arrays.h"
 #include "utility/deviceMap.h"
+#include "utility/memory.h"
 
 struct Mapper {
     __device__ int operator()(const int& a)
@@ -21,8 +22,8 @@ int main(int argc, char** argv)
 
     debugArray("dMappedArr[%d] = %d\n", dMappedArr, len, true, stderr);
 
-    cudaFree(dMappedArr);
-    cudaFree(dArr);
+    CUDA_FREE(dMappedArr);
+    CUDA_FREE(dArr);
 
     return 0;
 }

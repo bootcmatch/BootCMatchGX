@@ -1,59 +1,41 @@
 # ==============================================================================
-# $(TARGETDIR)/main
-# ==============================================================================
+
+C_SRCS           := $(shell find ./$(SOURCEDIR) -name "*.c" ! -name "*.unused.c" ! -path "./$(SOURCEDIR)/test/*" ! -path "./$(SOURCEDIR)/example/*")
+C_OBJS           := $(patsubst ./$(SOURCEDIR)/%.c,$(BUILDDIR)/%.o,$(C_SRCS))
+C_DEPS           := $(C_OBJS:.o=.d)
+
+CU_SRCS          := $(shell find ./$(SOURCEDIR) -name "*.cu" ! -name "*.unused.cu" ! -path "./$(SOURCEDIR)/test/*" ! -path "./$(SOURCEDIR)/example/*")
+CU_OBJS          := $(patsubst ./$(SOURCEDIR)/%.cu,$(BUILDDIR)/%.o,$(CU_SRCS))
+CU_DEPS          := $(CU_OBJS:.o=.d)
+
+ALL_OBJS         := $(C_OBJS) $(CU_OBJS)
+ALL_DEPS         := $(C_DEPS) $(CU_DEPS)
 
 OBJECTS = \
 	$(BUILDDIR)/EXTERNAL/nsparse.o \
-	$(BUILDDIR)/basic_kernel/halo_communication/extern.o \
-	$(BUILDDIR)/basic_kernel/halo_communication/halo_communication.o \
-	$(BUILDDIR)/basic_kernel/halo_communication/local_permutation.o \
-	$(BUILDDIR)/basic_kernel/halo_communication/newoverlap.o \
-	$(BUILDDIR)/custom_cudamalloc/custom_cudamalloc.o \
-	$(BUILDDIR)/config/Params.o \
-	$(BUILDDIR)/datastruct/CSR.o \
-	$(BUILDDIR)/datastruct/matrixItem.o \
-	$(BUILDDIR)/datastruct/scalar.o \
-	$(BUILDDIR)/datastruct/vector.o \
-	$(BUILDDIR)/generator/laplacian.o \
-	$(BUILDDIR)/op/addAbsoluteRowSumNoDiag.o \
-	$(BUILDDIR)/op/basic.o \
-	$(BUILDDIR)/op/double_merged_axpy.o \
-	$(BUILDDIR)/op/mydiag.o \
-	$(BUILDDIR)/op/getmct.o \
-	$(BUILDDIR)/op/spspmpi.o \
-	$(BUILDDIR)/op/triple_inner_product.o \
-	$(BUILDDIR)/preconditioner/bcmg/AMG.o \
-	$(BUILDDIR)/preconditioner/bcmg/bcmg.o \
-	$(BUILDDIR)/preconditioner/bcmg/BcmgPreconditionContext.o \
-	$(BUILDDIR)/preconditioner/bcmg/bootstrap.o \
-	$(BUILDDIR)/preconditioner/bcmg/GAMG_cycle.o \
-	$(BUILDDIR)/preconditioner/bcmg/matching.o \
-	$(BUILDDIR)/preconditioner/bcmg/matchingAggregation.o \
-	$(BUILDDIR)/preconditioner/bcmg/matchingPairAggregation.o \
-	$(BUILDDIR)/preconditioner/bcmg/suitor.o \
-	$(BUILDDIR)/preconditioner/l1jacobi/l1jacobi.o \
-	$(BUILDDIR)/preconditioner/prec_apply.o \
-	$(BUILDDIR)/preconditioner/prec_finalize.o \
-	$(BUILDDIR)/preconditioner/prec_setup.o \
-	$(BUILDDIR)/solver/cghs/CG_HS.o \
-	$(BUILDDIR)/solver/fcg/FCG.o \
-	$(BUILDDIR)/solver/solve.o \
-	$(BUILDDIR)/solver/SolverOut.o \
-	$(BUILDDIR)/utility/assignDeviceToProcess.o \
-	$(BUILDDIR)/utility/ColumnIndexSender.o \
-	$(BUILDDIR)/utility/distribuite.o \
-	$(BUILDDIR)/utility/globals.o \
-	$(BUILDDIR)/utility/handles.o \
-	$(BUILDDIR)/utility/MatrixItemSender.o \
-	$(BUILDDIR)/utility/memoryPools.o \
-	$(BUILDDIR)/utility/metrics.o \
-	$(BUILDDIR)/utility/mpi.o \
-	$(BUILDDIR)/utility/ProcessSelector.o \
-	$(BUILDDIR)/utility/string.o \
-	$(BUILDDIR)/utility/timing.o \
-	$(BUILDDIR)/utility/utils.o
+	$(ALL_OBJS)
 
-#	$(BUILDDIR)/op/LBfunctions.o \
+# ==============================================================================
+
+info:
+	@echo C_SRCS          : $(C_SRCS)
+	@echo C_OBJS          : $(C_OBJS)
+	@echo C_DEPS          : $(C_DEPS)
+	@echo ""
+	@echo CU_SRCS         : $(CU_SRCS)
+	@echo CU_OBJS         : $(CU_OBJS)
+	@echo CU_DEPS         : $(CU_DEPS)
+	@echo ""
+	@echo TEST_SRCS       : $(TEST_SRCS)
+	@echo TEST_OBJS       : $(TEST_OBJS)
+	@echo TEST_DEPS       : $(TEST_DEPS)
+	@echo TEST_BINS       : $(TEST_BINS)
+	@echo ""
+	@echo EXAMPLE_SRCS    : $(EXAMPLE_SRCS)
+	@echo EXAMPLE_OBJS    : $(EXAMPLE_OBJS)
+	@echo EXAMPLE_DEPS    : $(EXAMPLE_DEPS)
+	@echo EXAMPLE_BINS    : $(EXAMPLE_BINS)
+	@echo ""
 
 # ==============================================================================
 # src/EXTERNAL
@@ -61,98 +43,20 @@ OBJECTS = \
 
 $(BUILDDIR)/EXTERNAL/nsparse.o: $(NSPARSE_PATH)/src/kernel/kernel_spgemm_hash_d.cu
 	$(MKDIR) $(@D)
-	$(NVCC) -c -DDOUBLE -o $@ $(LIBS) $(INCLUDE) $(NSPARSE_GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
-
+	$(NVCC) -c -DDOUBLE -o $@ $(DEFINE) $(LIBS) $(INCLUDE) $(NSPARSE_GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
 
 # ==============================================================================
-# src/basic_kernel/halo_communication
+# Everything else
 # ==============================================================================
 
-$(BUILDDIR)/basic_kernel/halo_communication/%.o: src/basic_kernel/halo_communication/%.cu
+-include $(ALL_DEPS)
+
+.SECONDEXPANSION:
+
+$(C_OBJS): %.o: $$(patsubst $(BUILDDIR)/$$(PERCENT),$(SOURCEDIR)/$$(PERCENT),%.c)
 	$(MKDIR) $(@D)
-	$(NVCC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
+	$(CC) -MMD -MP -c -o $@ $(DEFINE) $(INCLUDE) $< $(CC_OPT)
 
-# ==============================================================================
-# src/config
-# ==============================================================================
-
-$(BUILDDIR)/config/%.o: src/config/%.cu
+$(CU_OBJS): %.o: $$(patsubst $(BUILDDIR)/$$(PERCENT),$(SOURCEDIR)/$$(PERCENT),%.cu)
 	$(MKDIR) $(@D)
-	$(NVCC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
-
-# ==============================================================================
-# src/custom_cudamalloc
-# ==============================================================================
-
-$(BUILDDIR)/custom_cudamalloc/%.o: src/custom_cudamalloc/%.cu
-	$(MKDIR) $(@D)
-	$(NVCC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
-
-# ==============================================================================
-# src/datastruct
-# ==============================================================================
-
-$(BUILDDIR)/datastruct/%.o: src/datastruct/%.cu
-	$(MKDIR) $(@D)
-	$(NVCC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
-
-# ==============================================================================
-# src/generator
-# ==============================================================================
-
-$(BUILDDIR)/generator/%.o: $(SOURCEDIR)/generator/%.cu
-	$(MKDIR) $(@D)
-	$(NVCC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
-
-# ==============================================================================
-# src/op
-# ==============================================================================
-
-$(BUILDDIR)/op/LBfunctions.o: src/op/LBfunctions.c
-	$(MKDIR) $(@D)
-	$(CC) -c -o $@ -I$(LAPACK_INC) -I$(CBLAS_INC) $^ $(CC_OPT)
-
-$(BUILDDIR)/op/%.o: $(SOURCEDIR)/op/%.cu
-	$(MKDIR) $(@D)
-	$(NVCC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
-
-# ==============================================================================
-# src/preconditioner
-# ==============================================================================
-
-$(BUILDDIR)/preconditioner/%.o: src/preconditioner/%.cu 
-	$(MKDIR) $(@D)
-	$(NVCC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
-
-# ==============================================================================
-# src/preconditioner/bcmg
-# ==============================================================================
-
-$(BUILDDIR)/preconditioner/bcmg/%.o: src/preconditioner/bcmg/%.cu 
-	$(MKDIR) $(@D)
-	$(NVCC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
-
-# ==============================================================================
-# src/preconditioner/l1jacobi
-# ==============================================================================
-
-$(BUILDDIR)/preconditioner/l1jacobi/%.o: src/preconditioner/l1jacobi/%.cu 
-	$(MKDIR) $(@D)
-	$(NVCC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
-
-# ==============================================================================
-# src/solver
-# ==============================================================================
-
-$(BUILDDIR)/solver/%.o: src/solver/%.cu
-	$(MKDIR) $(@D)
-	$(NVCC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
-
-# ==============================================================================
-# src/utility
-# ==============================================================================
-
-$(BUILDDIR)/utility/%.o: $(SOURCEDIR)/utility/%.cu
-	$(MKDIR) $(@D)
-	$(NVCC) -c -o $@ $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
-	
+	$(NVCC) -MMD -MP -c -DDOUBLE -o $@ $(DEFINE) $(LIBS) $(INCLUDE) $(NSPARSE_GPU_ARCH) $(NVCC_FLAG) $< $(NVCC_OPT)

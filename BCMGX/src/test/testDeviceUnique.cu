@@ -1,5 +1,6 @@
 #include "utility/arrays.h"
 #include "utility/deviceUnique.h"
+#include "utility/memory.h"
 
 int main(int argc, char** argv)
 {
@@ -15,8 +16,8 @@ int main(int argc, char** argv)
 
     // debugArray("dArrUnique[%d] = %d\n", dArrUnique, lenUnique, true, stderr);
 
-    cudaFree(dArr);
-    cudaFree(dArrUnique);
+    CUDA_FREE(dArr);
+    CUDA_FREE(dArrUnique);
 
     return 0;
 }

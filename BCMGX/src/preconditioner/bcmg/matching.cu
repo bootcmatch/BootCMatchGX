@@ -4,11 +4,9 @@
 
 #include "datastruct/CSR.h"
 #include "utility/cudamacro.h"
-#include "utility/function_cnt.h"
 #include "utility/handles.h"
-#include "utility/memoryPools.h"
-#include "utility/metrics.h"
-#include "utility/timing.h"
+#include "utility/memory.h"
+#include "utility/profiling.h"
 
 __forceinline__
     __device__ int
@@ -67,7 +65,6 @@ __global__ void _write_T_warp(itype n, int MINI_WARP_SIZE, vtype* A_val, itype* 
 
 __global__ void _makeAH_warp(itype n, int AH_MINI_WARP_SIZE, vtype* A_val, itype* A_col, itype* A_row, vtype* w, vtype* C, vtype* AH_val, itype* AH_col, itype* AH_row, itype row_shift)
 {
-
     itype tid = blockDim.x * blockIdx.x + threadIdx.x;
 
     itype warp = tid / AH_MINI_WARP_SIZE;
@@ -115,7 +112,6 @@ __global__ void _makeAH_warp(itype n, int AH_MINI_WARP_SIZE, vtype* A_val, itype
 
 __global__ void _makeC(stype n, vtype* val, itype* col, itype* row, vtype* w, vtype* C, itype row_shift)
 {
-
     itype i = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (i >= n) {
@@ -132,13 +128,13 @@ __global__ void _makeC(stype n, vtype* val, itype* col, itype* row, vtype* w, vt
 
         // if is a diagonal element
         if (c == r) {
-            C[r] = val[j] * w[r] * w[r];
+            C[r] = val[j] * w[r] * w[r] /* pow(w[r], 2) */;
             break;
         }
     }
 }
 
-CSR* makeAH(CSR* A, vector<vtype>* w)
+CSR* makeAH(buildData* amg_data, CSR* A, vector<vtype>* w)
 {
     _MPI_ENV;
     static int cnt = 0;
@@ -150,14 +146,14 @@ CSR* makeAH(CSR* A, vector<vtype>* w)
 
     // init a vector on the device
     vector<vtype>* C = Vector::init<vtype>(A->n, false, true);
-    C->val = (vtype*)MemoryPool::local[0];
+    C->val = amg_data->ws_buffer->val;
 
     GridBlock gb = gb1d(n, BLOCKSIZE, false);
     // only local access to w, c must be local but with shift
     _makeC<<<gb.g, gb.b>>>(n, A->val, A->col, A->row, w->val, C->val, A->row_shift);
 
     // Diagonal MUST be non-empty!
-    //  ----------------------------------------- custom cudaMalloc -------------------------------------------
+    // -------------------------------------------------------------------------------------------------------
     CSR* AH = CSRm::init(A->n, A->m, (A->nnz - A->n), false, true, A->is_symmetric, A->full_n, A->row_shift);
     AH->val = AH_glob_val;
     AH->col = AH_glob_col;
@@ -168,7 +164,7 @@ CSR* makeAH(CSR* A, vector<vtype>* w)
     gb = gb1d(n, BLOCKSIZE, true, miniwarp_size);
     _makeAH_warp<<<gb.g, gb.b>>>(n, miniwarp_size, A->val, A->col, A->row, w->val, C->val, AH->val, AH->col, AH->row, AH->row_shift);
 
-    free(C);
+    FREE(C);
     cnt++;
 
     return AH;
@@ -193,42 +189,36 @@ vtype* find_Max_Min(vtype* a, stype n, int op_type)
 {
     size_t temp_storage_bytes = 0;
 
-    cudaError_t err;
+    // cudaError_t err;
     if (min_max == NULL) {
-        cudaMalloc_CNT
-            err
-            = cudaMalloc((void**)&min_max, sizeof(vtype) * 1);
-        CHECK_DEVICE(err);
+        min_max = CUDA_MALLOC(vtype, 1, true);
     }
 
     if (op_type == 0) {
         cub::DeviceReduce::Max(d_temp_storage_max_min, temp_storage_bytes, a, min_max, n);
         // Allocate temporary storage
-        cudaMalloc_CNT
-            err
-            = cudaMalloc(&d_temp_storage_max_min, temp_storage_bytes);
-        CHECK_DEVICE(err);
+        d_temp_storage_max_min = CUDA_MALLOC_BYTES(void, temp_storage_bytes);
         // Run max-reduction
         cub::DeviceReduce::Max(d_temp_storage_max_min, temp_storage_bytes, a, min_max, n);
     } else if (op_type == 1) {
         AbsMin absmin;
         cub::DeviceReduce::Reduce(d_temp_storage_max_min, temp_storage_bytes, a, min_max, n, absmin, DBL_MAX);
         // Allocate temporary storage
-        cudaMalloc_CNT
-            err
-            = cudaMalloc(&d_temp_storage_max_min, temp_storage_bytes);
-        CHECK_DEVICE(err);
+        if (temp_storage_bytes) {
+            d_temp_storage_max_min = CUDA_MALLOC_BYTES(void, temp_storage_bytes);
+        }
         // Run max-reduction
         cub::DeviceReduce::Reduce(d_temp_storage_max_min, temp_storage_bytes, a, min_max, n, absmin, DBL_MAX);
     }
 
-    CHECK_DEVICE(err);
+    //  CUDA_FREE(d_temp_storage);
 
     return min_max;
 }
 
 __global__ void _make_w(stype nnz, vtype* val, vtype min)
 {
+
     stype i = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (i >= nnz) {
@@ -260,47 +250,27 @@ CSR* toMaximumProductMatrix(CSR* AH)
     return AH;
 }
 
-vector<itype>* suitor(handles* h, CSR* A, vector<vtype>* w)
+vector<itype>* suitor(handles* h, buildData* amg_data, CSR* A, vector<vtype>* w)
 {
-    PUSH_RANGE(__func__, 7)
-
     _MPI_ENV;
-    TIMER_DEF;
     assert(A->on_the_device && w->on_the_device);
 
-    if (DETAILED_TIMING && ISMASTER) {
-        cudaDeviceSynchronize();
-        TIMER_START;
-    }
-    CSR* AH = makeAH(A, w);
-
+    // BEGIN_DETAILED_TIMING(PREC_SETUP, MAKEAHW)
+    CSR* AH = makeAH(amg_data, A, w);
     CSR* W = toMaximumProductMatrix(AH);
+    // END_DETAILED_TIMING(PREC_SETUP, MAKEAHW)
 
-    if (DETAILED_TIMING && ISMASTER) {
-        cudaDeviceSynchronize();
-        TIMER_STOP;
-        TOTAL_MAKEAHW_TIME += TIMER_ELAPSED;
-    }
-
-    vector<itype>* _M = NULL;
-
-    if (DETAILED_TIMING && ISMASTER) {
-        cudaDeviceSynchronize();
-        TIMER_START;
-    }
-
-    vector<vtype>* ws_buffer;
-    vector<itype>* mutex_buffer;
+    // BEGIN_DETAILED_TIMING(PREC_SETUP, SUITOR)
     itype n = W->n;
 
-    ws_buffer = Vector::init<vtype>(n, false, true);
-    ws_buffer->val = (vtype*)MemoryPool::local[0];
+    vector<vtype>* ws_buffer = Vector::init<vtype>(n, false, true);
+    ws_buffer->val = amg_data->ws_buffer->val;
 
-    mutex_buffer = Vector::init<itype>(n, false, true);
-    mutex_buffer->val = (itype*)MemoryPool::local[1];
+    vector<itype>* mutex_buffer = Vector::init<itype>(n, false, true);
+    mutex_buffer->val = amg_data->mutex_buffer->val;
 
-    _M = Vector::init<itype>(n, false, true);
-    _M->val = (itype*)MemoryPool::local[2];
+    vector<itype>* _M = Vector::init<itype>(n, false, true);
+    _M->val = amg_data->_M->val;
 
     int warp_size = CSRm::choose_mini_warp_size(W);
     GridBlock gb = gb1d(n, BLOCKSIZE, true, warp_size);
@@ -308,16 +278,11 @@ vector<itype>* suitor(handles* h, CSR* A, vector<vtype>* w)
 
     approx_match_gpu_suitor(h, A, W, _M, ws_buffer, mutex_buffer);
 
-    if (DETAILED_TIMING && ISMASTER) {
-        TIMER_STOP;
-        SUITOR_TIME += TIMER_ELAPSED;
-    }
-    free(ws_buffer);
-    free(mutex_buffer);
+    // END_DETAILED_TIMING(PREC_SETUP, SUITOR)
 
-    std::free(W);
-
-    POP_RANGE
+    FREE(ws_buffer);
+    FREE(mutex_buffer);
+    FREE(W);
 
     return _M;
 }

@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string>
 
-#define DEFAULTSCALENNZMISS 16384
+#define DEFAULTSCALENNZMISS 64
 int xsize = 0;
 double* xvalstat = NULL;
 int* taskmap = NULL;
@@ -9,6 +10,9 @@ int* itaskmap = NULL;
 int scalennzmiss = DEFAULTSCALENNZMISS;
 char idstring[128];
 FILE* log_file = NULL;
+std::string output_dir = "./";
+std::string output_prefix = "";
+std::string output_suffix = "";
 
 void close_log_file()
 {
@@ -36,11 +40,11 @@ void open_log_file(int myid, const char* log_filename)
 }
 
 namespace BCM {
-void init(int argc, char **argv) {
-
+void init(int argc, char** argv)
+{
 }
 
-void shutdown() {
-    
+void shutdown()
+{
 }
 };

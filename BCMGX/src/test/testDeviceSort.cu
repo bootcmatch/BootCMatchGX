@@ -1,5 +1,6 @@
 #include "utility/arrays.h"
 #include "utility/deviceSort.h"
+#include "utility/memory.h"
 
 struct Comparator {
     __device__ bool operator()(const int& a, const int& b) const
@@ -26,7 +27,7 @@ int main(int argc, char** argv)
 
     debugArray("dArrSorted[%d] = %d\n", dArr, len, true, stderr);
 
-    cudaFree(dArr);
+    CUDA_FREE(dArr);
 
     return 0;
 }

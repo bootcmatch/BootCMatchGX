@@ -1,5 +1,7 @@
 #include "datastruct/matrixItem.h"
 #include "utility/devicePrefixSum.h"
+#include "utility/hostPrefixSum.h"
+#include "utility/memory.h"
 
 MPI_Datatype MPI_MATRIX_ITEM_T;
 
@@ -23,11 +25,11 @@ void debugMatrixItems(const char* title, matrixItem_t* arr, size_t len, bool isO
 
     fprintf(f, "%s:\n", title);
     for (size_t i = 0; i < len; i++) {
-        fprintf(f, "\t[%zu]: r %d, c %d = %lf\n", i, hArr[i].row, hArr[i].col, hArr[i].val);
+        fprintf(f, "\t[%zu]: r %ld, c %ld = %lf\n", i, hArr[i].row, hArr[i].col, hArr[i].val);
     }
 
     if (isOnDevice) {
-        free(hArr);
+        FREE(hArr);
     }
 }
 
@@ -84,14 +86,9 @@ void fillCsrFromMatrixItems(
     vtype* val = NULL;
 
     if (allocateMemory) {
-        CHECK_DEVICE(cudaMalloc(&row, (n + 1) * sizeof(itype)));
-        CHECK_DEVICE(cudaMemset(row, 0, (n + 1) * sizeof(itype)));
-
-        CHECK_DEVICE(cudaMalloc(&col, nnz * sizeof(itype)));
-        CHECK_DEVICE(cudaMemset(col, 0, nnz * sizeof(itype)));
-
-        CHECK_DEVICE(cudaMalloc(&val, nnz * sizeof(vtype)));
-        CHECK_DEVICE(cudaMemset(val, 0, nnz * sizeof(vtype)));
+        row = CUDA_MALLOC(itype, n + 1, true);
+        col = CUDA_MALLOC(itype, nnz, true);
+        val = CUDA_MALLOC(vtype, nnz, true);
     } else {
         row = *rowRet;
         col = *colRet;
@@ -111,6 +108,58 @@ void fillCsrFromMatrixItems(
 
     // Adjust row indexes
     devicePrefixSum(row, n + 1);
+
+    *rowRet = row;
+    *colRet = col;
+    *valRet = val;
+}
+
+/**
+ * Scans a vector of matrix items and fills the CSR.
+ */
+void fillCsrFromMatrixItems_nogpu(
+    matrixItem_t* items,
+    size_t nnz,
+    size_t n,
+    int rowShift,
+    itype** rowRet,
+    itype** colRet,
+    vtype** valRet,
+    bool transposed,
+    bool allocateMemory)
+{
+    itype* row = NULL;
+    itype* col = NULL;
+    vtype* val = NULL;
+
+    if (allocateMemory) {
+        row = MALLOC(itype, n + 1, true);
+        col = MALLOC(itype, nnz, true);
+        val = MALLOC(vtype, nnz, true);
+    } else {
+        row = *rowRet;
+        col = *colRet;
+        val = *valRet;
+    }
+
+    itype irow;
+    itype icol;
+    for (int i = 0; i < nnz; i++) {
+        matrixItem_t item = items[i];
+        if (transposed) {
+            irow = item.col - rowShift + 1;
+            icol = item.row;
+        } else {
+            irow = item.row - rowShift + 1;
+            icol = item.col;
+        }
+        row[irow]++;
+        col[i] = icol;
+        val[i] = item.val;
+    }
+
+    // Adjust row indexes
+    hostPrefixSum(row, n + 1);
 
     *rowRet = row;
     *colRet = col;
