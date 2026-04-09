@@ -45,23 +45,28 @@ __global__ void _fillCsrFromMatrixItems(
     int rowShift,
     itype* row,
     itype* col,
+    gsstype* col8,
     vtype* val,
     bool transposed)
 {
     int tid = threadIdx.x + blockDim.x * blockIdx.x;
     itype irow;
     itype icol;
+    gsstype icol8;
     while (tid < nnz) {
         matrixItem_t item = items[tid];
         if (transposed) {
             irow = item.col - rowShift + 1;
             icol = item.row;
+            icol8 = item.row;
         } else {
             irow = item.row - rowShift + 1;
             icol = item.col;
+            icol8 = item.col;
         }
         atomicAdd(&row[irow], 1);
         col[tid] = icol;
+        col8[tid] = icol8;
         val[tid] = item.val;
         tid += blockDim.x * gridDim.x;
     }
@@ -77,21 +82,25 @@ void fillCsrFromMatrixItems(
     int rowShift,
     itype** rowRet,
     itype** colRet,
+    gsstype** colRet8,
     vtype** valRet,
     bool transposed,
     bool allocateMemory)
 {
     itype* row = NULL;
     itype* col = NULL;
+    gsstype* col8 = NULL;
     vtype* val = NULL;
 
     if (allocateMemory) {
         row = CUDA_MALLOC(itype, n + 1, true);
         col = CUDA_MALLOC(itype, nnz, true);
+        col8 = CUDA_MALLOC(gsstype, nnz, true);
         val = CUDA_MALLOC(vtype, nnz, true);
     } else {
         row = *rowRet;
         col = *colRet;
+        col8 = *colRet8;
         val = *valRet;
     }
 
@@ -102,6 +111,7 @@ void fillCsrFromMatrixItems(
         rowShift,
         row,
         col,
+        col8,
         val,
         transposed);
     CHECK_DEVICE(cudaDeviceSynchronize());
@@ -111,6 +121,7 @@ void fillCsrFromMatrixItems(
 
     *rowRet = row;
     *colRet = col;
+    *colRet8 = col8;
     *valRet = val;
 }
 
@@ -124,37 +135,45 @@ void fillCsrFromMatrixItems_nogpu(
     int rowShift,
     itype** rowRet,
     itype** colRet,
+    gsstype** colRet8,
     vtype** valRet,
     bool transposed,
     bool allocateMemory)
 {
     itype* row = NULL;
     itype* col = NULL;
+    gsstype* col8 = NULL;
     vtype* val = NULL;
 
     if (allocateMemory) {
         row = MALLOC(itype, n + 1, true);
         col = MALLOC(itype, nnz, true);
+        col8 = MALLOC(gsstype, nnz, true);
         val = MALLOC(vtype, nnz, true);
     } else {
         row = *rowRet;
         col = *colRet;
+        col8 = *colRet8;
         val = *valRet;
     }
 
     itype irow;
     itype icol;
+    gsstype icol8;
     for (int i = 0; i < nnz; i++) {
         matrixItem_t item = items[i];
         if (transposed) {
             irow = item.col - rowShift + 1;
             icol = item.row;
+            icol8 = item.row;
         } else {
             irow = item.row - rowShift + 1;
             icol = item.col;
+            icol8 = item.col;
         }
         row[irow]++;
         col[i] = icol;
+        col8[i] = icol8;
         val[i] = item.val;
     }
 
@@ -163,5 +182,6 @@ void fillCsrFromMatrixItems_nogpu(
 
     *rowRet = row;
     *colRet = col;
+    *colRet8 = col8;
     *valRet = val;
 }

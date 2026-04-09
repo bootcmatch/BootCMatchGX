@@ -34,7 +34,7 @@ void freeContext();
 
 /**
  * @brief Performs a recursive GAMG cycle for solving a linear system.
- * 
+ *
  * @param h CUDA stream handles.
  * @param k Current hierarchy index.
  * @param bootamg_data Bootstrap AMG data.

@@ -21,4 +21,4 @@
  * @param alpha_beta_gamma Pointer to an array where the results (alpha, beta, gamma) will be stored.
  * @param shift The shift index for accessing the vector `v`.
  */
- void triple_innerproduct(vector<vtype>* r, vector<vtype>* w, vector<vtype>* q, vector<vtype>* v, vector<vtype>* alpha_beta_gamma, vtype* alpha, vtype* beta, vtype* gamma, itype shift);
+void triple_innerproduct(vector<vtype>* r, vector<vtype>* w, vector<vtype>* q, vector<vtype>* v, vector<vtype>* alpha_beta_gamma, vtype* alpha, vtype* beta, vtype* gamma, itype shift);

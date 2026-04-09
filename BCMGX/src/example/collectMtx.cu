@@ -14,8 +14,7 @@ bool matrix_sorter(CSR* lhs, CSR* rhs)
 int main(int argc, char** argv)
 {
     if (argc < 3) {
-        printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        DIE(USAGE, argv[0]);
     }
 
     const char* out_file_name = argv[1];

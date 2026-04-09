@@ -1,6 +1,6 @@
 #include "datastruct/CSR.h"
 #include "datastruct/vector.h"
-#include "utility/distribuite.h"
+#include "utility/distribute.h"
 #include "utility/memory.h"
 #include "utility/utils.h"
 #include <assert.h>

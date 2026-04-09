@@ -2,21 +2,30 @@
 
 #include "halo_communication/extern2.h"
 #include "halo_communication/halo_communication.h"
+#include "op/spspmpi.h"
 
 #include "datastruct/matrixItem.h"
 #include "utility/MatrixItemSender.h"
+#include "utility/arrays.h"
+#include "utility/col8.h"
 #include "utility/cuCompactorXT.cuh"
 #include "utility/cudamacro.h"
+#include "utility/deviceMax.h"
+#include "utility/deviceMemEq.h"
 #include "utility/devicePartition.h"
 #include "utility/devicePrefixSum.h"
 #include "utility/deviceSort.h"
+#include "utility/deviceUnique.h"
+#include "utility/distribute.h"
 #include "utility/hostPartition.h"
 #include "utility/hostSort.h"
 #include "utility/profiling.h"
 
 #include <cub/cub.cuh>
 #include <string.h>
+#include <unordered_set>
 
+#define DEBUG 0
 #define MAXMATRIXFILENAME 256
 
 int CSRm::choose_mini_warp_size(CSR* A)
@@ -75,16 +84,19 @@ CSR* CSRm::init(stype n, gstype m, stype nnz, bool allocate_mem, bool on_the_dev
     A->post_local = 0;
     A->bitcolsize = 0;
     A->bitcol = NULL;
-
+    A->col = NULL;
+    A->col8 = NULL;
     if (allocate_mem) {
         if (on_the_device) {
             // on the device
             A->val = CUDA_MALLOC(vtype, nnz, true);
+            A->col8 = CUDA_MALLOC(gsstype, nnz, true);
             A->col = CUDA_MALLOC(itype, nnz, true);
             A->row = CUDA_MALLOC(itype, n + 1, true);
         } else {
             // on the host
             A->val = MALLOC(vtype, nnz, true);
+            A->col8 = MALLOC(gsstype, nnz, true);
             A->col = MALLOC(itype, nnz, true);
             A->row = MALLOC(itype, n + 1, true);
         }
@@ -93,7 +105,140 @@ CSR* CSRm::init(stype n, gstype m, stype nnz, bool allocate_mem, bool on_the_dev
     return A;
 }
 
+// void CSRm::printMM(CSR* A, char* name, bool appendMyIdAndNprocs)
+// {
+//     _MPI_ENV;
+//     CSR* A_ = NULL;
+//     if (A->on_the_device) {
+//         A_ = CSRm::copyToHost(A);
+//     } else {
+//         A_ = A;
+//     }
+
+//     char localname[MAXMATRIXFILENAME];
+//     if (appendMyIdAndNprocs) {
+//         snprintf(localname, sizeof(localname), "%s_%d_%d", name, myid, nprocs);
+//     } else {
+//         snprintf(localname, sizeof(localname), "%s", name);
+//     }
+//     FILE* fp = fopen(localname, "w");
+//     if (fp == NULL) {
+//         DIE("Could not open %s", localname);
+//     }
+//     fprintf(fp, "%%%%MatrixMarket matrix coordinate real general\n");
+//     fprintf(fp, "%d %lu %d "
+//                 "%ld %ld %ld\n",
+//         A_->n, A_->m, A_->nnz,
+//         A_->row_shift, A_->full_n, A_->col_shifted);
+//     for (int i = 0; i < A_->n; i++) {
+//         for (int j = A_->row[i]; j < A_->row[i + 1]; j++) {
+//             // fprintf(fp, "%lu %ld %ld %ld %lf\n",
+//             fprintf(fp, "%lu %ld %lf\n",
+//                 i + 1 + A_->row_shift,
+//                 A_->col[j] + 1 - A_->col_shifted,
+//                 // A_->col8[j],
+//                 // A_->col8[j] + 1 - A_->col_shifted,
+//                 A_->val[j]);
+//         }
+//     }
+//     fclose(fp);
+
+//     if (A->on_the_device) {
+//         CSRm::free(A_);
+//     }
+// }
+
+void CSRm::printMM(CSR* A, FILE* fp)
+{
+    _MPI_ENV;
+    CSR* A_ = NULL;
+    if (A->on_the_device) {
+        A_ = CSRm::copyToHost(A);
+    } else {
+        A_ = A;
+    }
+
+    fprintf(fp, "%%%%MatrixMarket matrix coordinate real general\n");
+    fprintf(fp, "%d %lu %d "
+                "%ld %ld %ld\n",
+        A_->n, A_->m, A_->nnz,
+        A_->row_shift, A_->full_n, A_->col_shifted);
+    for (int i = 0; i < A_->n; i++) {
+        for (int j = A_->row[i]; j < A_->row[i + 1]; j++) {
+            // fprintf(fp, "%lu %ld %ld %ld %lf\n",
+            fprintf(fp, "%lu %ld %lf\n",
+                i + 1 + A_->row_shift,
+                A_->col[j] + 1 - A_->col_shifted,
+                // A_->col8[j],
+                // A_->col8[j] + 1 - A_->col_shifted,
+                A_->val[j]);
+        }
+    }
+
+    if (A->on_the_device) {
+        CSRm::free(A_);
+    }
+}
+
 void CSRm::printMM(CSR* A, char* name, bool appendMyIdAndNprocs)
+{
+    _MPI_ENV;
+    char localname[MAXMATRIXFILENAME];
+    if (appendMyIdAndNprocs) {
+        snprintf(localname, sizeof(localname), "%s_%d_%d", name, myid, nprocs);
+    } else {
+        snprintf(localname, sizeof(localname), "%s", name);
+    }
+    FILE* fp = fopen(localname, "w");
+    printMM(A, fp);
+    fclose(fp);
+}
+
+void CSRm::printMMsimple(CSR* A, FILE* fp)
+{
+    _MPI_ENV;
+    CSR* A_ = NULL;
+    if (A->on_the_device) {
+        A_ = CSRm::copyToHost(A);
+    } else {
+        A_ = A;
+    }
+
+    fprintf(fp, "%%%%MatrixMarket matrix coordinate real general\n");
+    fprintf(fp, "%d %lu %d "
+                "\n",
+        A_->n, A_->m, A_->nnz);
+    for (int i = 0; i < A_->n; i++) {
+        for (int j = A_->row[i]; j < A_->row[i + 1]; j++) {
+            fprintf(fp, "%d %d %15le\n",
+                i + 1,
+                A_->col[j] + 1,
+                A_->val[j]);
+        }
+    }
+
+    if (A->on_the_device) {
+        CSRm::free(A_);
+    }
+}
+
+void CSRm::printMMsimple(CSR* A, char* name, bool appendMyIdAndNprocs)
+{
+    _MPI_ENV;
+    char localname[MAXMATRIXFILENAME];
+    if (appendMyIdAndNprocs) {
+        snprintf(localname, sizeof(localname), "%s_%d_%d", name, myid, nprocs);
+    } else {
+        snprintf(localname, sizeof(localname), "%s", name);
+    }
+    FILE* fp = fopen(localname, "w");
+    printMMsimple(A, fp);
+    fclose(fp);
+}
+
+
+
+void CSRm::printMMsc(CSR* A, char* name, bool appendMyIdAndNprocs)
 {
     _MPI_ENV;
     CSR* A_ = NULL;
@@ -111,8 +256,7 @@ void CSRm::printMM(CSR* A, char* name, bool appendMyIdAndNprocs)
     }
     FILE* fp = fopen(localname, "w");
     if (fp == NULL) {
-        fprintf(stderr, "Could not open %s", localname);
-        exit(1);
+        DIE("Could not open %s", localname);
     }
     fprintf(fp, "%%%%MatrixMarket matrix coordinate real general\n");
     fprintf(fp, "%d %lu %d "
@@ -121,9 +265,10 @@ void CSRm::printMM(CSR* A, char* name, bool appendMyIdAndNprocs)
         A_->row_shift, A_->full_n, A_->col_shifted);
     for (int i = 0; i < A_->n; i++) {
         for (int j = A_->row[i]; j < A_->row[i + 1]; j++) {
-            fprintf(fp, "%lu %ld %lf\n",
+            fprintf(fp, "%lu %ld %d %lf\n",
                 i + 1 + A_->row_shift,
                 A_->col[j] + 1 - A_->col_shifted,
+                A_->shrinked_col[j] + 1,
                 A_->val[j]);
         }
     }
@@ -134,7 +279,7 @@ void CSRm::printMM(CSR* A, char* name, bool appendMyIdAndNprocs)
     }
 }
 
-void CSRm::print(CSR* A, int type, int limit, FILE* fp)
+void CSRm::print(CSR* A, int type, int limit, FILE* fp, bool show_header, bool show_footer)
 {
     CSR* A_ = NULL;
 
@@ -146,7 +291,9 @@ void CSRm::print(CSR* A, int type, int limit, FILE* fp)
 
     switch (type) {
     case 0:
-        fprintf(fp, "ROW: %d (%lu)\n\t", A_->n, A_->full_n);
+        if (show_header) {
+            fprintf(fp, "ROW: %d (%lu)\n\t", A_->n, A_->full_n);
+        }
         if (limit == 0) {
             limit = A_->full_n + 1;
         }
@@ -155,7 +302,9 @@ void CSRm::print(CSR* A, int type, int limit, FILE* fp)
         }
         break;
     case 1:
-        fprintf(fp, "COL:\n");
+        if (show_header) {
+            fprintf(fp, "COL:\n");
+        }
         if (limit == 0) {
             limit = A_->nnz;
         }
@@ -164,7 +313,9 @@ void CSRm::print(CSR* A, int type, int limit, FILE* fp)
         }
         break;
     case 2:
-        fprintf(fp, "VAL:\n");
+        if (show_header) {
+            fprintf(fp, "VAL:\n");
+        }
         if (limit == 0) {
             limit = A_->nnz;
         }
@@ -173,26 +324,46 @@ void CSRm::print(CSR* A, int type, int limit, FILE* fp)
         }
         break;
     case 3:
-        fprintf(fp, "MATRIX_Form:\n");
+        if (show_header) {
+            fprintf(fp, "MATRIX_Form:\n");
+        }
         for (int i = 0; i < A_->n; i++) {
             fprintf(fp, "\t");
-            for (int j = 0; j < A_->m; j++) {
-                int flag = 0, temp = A_->row[i];
-                for (temp = A_->row[i]; flag == 0 && (i != (A_->n) - 1 ? temp < (A_->row[i + 1]) : temp < A_->nnz); temp++) {
-                    if (A_->col[temp] == j) {
-                        fprintf(fp, "%g ", A_->val[temp]);
-                        flag = 1;
-                    }
-                }
-                if (flag == 0) {
+            int next_col = 0;
+            for (int j = A_->row[i]; j < A_->row[i+1]; j++) {
+                int icol = A_->col[j] + A_->row_shift;
+                while (next_col < icol) {
                     fprintf(fp, "%g ", 0.0);
+                    next_col++;
                 }
+                fprintf(fp, "%g ", A_->val[j]);
+                next_col = icol + 1;
             }
+            while (next_col < A_->m) {
+                fprintf(fp, "%g ", 0.0);
+                next_col++;
+            }
+
+            // fprintf(fp, "\t");
+            // for (int j = 0; j < A_->m; j++) {
+            //     int flag = 0, temp = A_->row[i];
+            //     for (temp = A_->row[i]; flag == 0 && (i != (A_->n) - 1 ? temp < (A_->row[i + 1]) : temp < A_->nnz); temp++) {
+            //         if (A_->col[temp] == j) {
+            //             fprintf(fp, "%g ", A_->val[temp]);
+            //             flag = 1;
+            //         }
+            //     }
+            //     if (flag == 0) {
+            //         fprintf(fp, "%g ", 0.0);
+            //     }
+            // }
             fprintf(fp, "\n");
         }
         break;
     case 4:
-        fprintf(fp, "boolMATRIX_Form:\n");
+        if (show_header) {
+            fprintf(fp, "boolMATRIX_Form:\n");
+        }
         for (int i = 0; i < A_->n; i++) {
             fprintf(fp, "\t");
             for (int j = 0; j < A_->m; j++) {
@@ -214,7 +385,9 @@ void CSRm::print(CSR* A, int type, int limit, FILE* fp)
         }
         break;
     case 5:
-        fprintf(fp, "SHRINKED COL:\n");
+        if (show_header) {
+            fprintf(fp, "SHRINKED COL:\n");
+        }
         if (limit == 0) {
             limit = A_->shrinked_m;
         }
@@ -223,7 +396,9 @@ void CSRm::print(CSR* A, int type, int limit, FILE* fp)
         }
         break;
     }
-    fprintf(fp, "\n\n");
+    if (show_footer) {
+        fprintf(fp, "\n\n");
+    }
 
     if (A->on_the_device) {
         CSRm::free(A_);
@@ -257,12 +432,16 @@ void CSRm::free(CSR* A)
 {
     if (A->on_the_device) {
         CUDA_FREE(A->val);
-        CUDA_FREE(A->col);
+        CUDA_FREE(A->col8);
+        //        CUDA_FREE(A->col);
         CUDA_FREE(A->row);
         CUDA_FREE(A->shrinked_col);
     } else {
         FREE(A->val);
         FREE(A->col);
+        if (A->col8 != NULL) {
+            FREE(A->col8);
+        }
         FREE(A->row);
     }
     if (A->rows_to_get != NULL) {
@@ -320,6 +499,144 @@ void shift_cpucol(itype* Arow, itype* Acol, unsigned int n, stype row_shift)
     }
 }
 
+CSR* CSRm::clone(CSR* A)
+{
+    CSR *ret = CSRm::init(A->n, A->m, A->nnz, false, A->on_the_device, A->is_symmetric, A->full_n, A->row_shift);
+
+    if (A->on_the_device) {
+        ret->row = CUDA_MALLOC(itype, A->n + 1, false);
+        CHECK_DEVICE(cudaMemcpy(ret->row, A->row, (A->n + 1) * sizeof(itype), cudaMemcpyDeviceToDevice));
+
+        ret->col = CUDA_MALLOC(itype, A->nnz, false);
+        CHECK_DEVICE(cudaMemcpy(ret->col, A->col, A->nnz * sizeof(itype), cudaMemcpyDeviceToDevice));
+
+        ret->col8 = CUDA_MALLOC(gsstype, A->nnz, false);
+        CHECK_DEVICE(cudaMemcpy(ret->col8, A->col8, A->nnz * sizeof(gsstype), cudaMemcpyDeviceToDevice));
+
+        ret->val = CUDA_MALLOC(vtype, A->nnz, false);
+        CHECK_DEVICE(cudaMemcpy(ret->val, A->val, A->nnz * sizeof(vtype), cudaMemcpyDeviceToDevice));
+    } else {
+        ret->row = MALLOC(itype, A->n + 1, false);
+        memcpy(ret->row, A->row, (A->n + 1) * sizeof(itype));
+
+        ret->col = MALLOC(itype, A->nnz, false);
+        memcpy(ret->col, A->col, A->nnz * sizeof(itype));
+
+        ret->col8 = MALLOC(gsstype, A->nnz, false);
+        memcpy(ret->col8, A->col8, A->nnz * sizeof(gsstype));
+
+        ret->val = MALLOC(vtype, A->nnz, false);
+        memcpy(ret->val, A->val, A->nnz * sizeof(vtype));
+    }
+    ret->custom_alloced = true;
+    ret->col_shifted = A->col_shifted;
+
+    return ret;
+}
+
+__global__ void _diagonalScaling(stype An,
+    itype* Arow, vtype* Aval,
+    vtype* retval,
+    vtype* D,
+    int warpSize)
+{
+    int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int irow = tid / warpSize;
+    int lane = tid % warpSize;
+    int rstart, rend;
+
+    if (irow < An) {
+        rstart = Arow[irow] + lane;
+        rend = Arow[irow + 1];
+        for (int we = rstart; we < rend; we += warpSize) {
+            retval[we] = Aval[we] / D[irow];
+        }
+    }
+}
+
+/**
+ * Returns B = D^-1 A.
+ */
+CSR *CSRm::diagonalScaling(CSR *A, vector<vtype> *D) {
+    assert(A->on_the_device);
+    assert(D->on_the_device);
+    assert(A->full_n == A->m);
+    assert(A->n == D->n);
+    assert(!A->is_symmetric);
+
+    CSR* ret = CSRm::clone(A);
+    
+    int warpSize = CSRm::choose_mini_warp_size(A);
+    GridBlock gb = getKernelParams(A->n * warpSize); // One mini-warp per row
+
+    _diagonalScaling<<<gb.g, gb.b>>>(A->n,
+        A->row, A->val,
+        ret->val,
+        D->val,
+        warpSize);
+    cudaError_t err = cudaDeviceSynchronize();
+    CHECK_DEVICE(err);
+
+    return ret;
+}
+
+void CSRm::diagonalScalingInPlace(CSR *A, vector<vtype> *D) {
+    assert(A->on_the_device);
+    assert(D->on_the_device);
+    assert(A->full_n == A->m);
+    assert(A->n == D->n);
+    assert(!A->is_symmetric);
+
+    CSR* ret = A;
+    
+    int warpSize = CSRm::choose_mini_warp_size(A);
+    GridBlock gb = getKernelParams(A->n * warpSize); // One mini-warp per row
+
+    _diagonalScaling<<<gb.g, gb.b>>>(A->n,
+        A->row, A->val,
+        ret->val,
+        D->val,
+        warpSize);
+    cudaError_t err = cudaDeviceSynchronize();
+    CHECK_DEVICE(err);
+}
+
+__global__ void _rowSum(stype An,
+    itype* Arow, vtype* Aval,
+    vtype* retval,
+    vtype* D,
+    int warpSize)
+{
+    int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int irow = tid / warpSize;
+    int lane = tid % warpSize;
+    int rstart, rend;
+
+    if (irow < An) {
+        rstart = Arow[irow] + lane;
+        rend = Arow[irow + 1];
+        for (int we = rstart; we < rend; we += warpSize) {
+            retval[we] = Aval[we] / D[irow];
+        }
+    }
+}
+
+vtype CSRm::localInfinityNorm(CSR *A) {
+    vector<vtype> *sum = CSRm::absoluteRowSum(A, NULL);
+    vtype ret = deviceMax(sum->val, sum->n);
+    Vector::free(sum);
+    return ret;
+}
+
+vtype CSRm::globalInfinityNorm(CSR *A) {
+    vector<vtype> *sum = CSRm::absoluteRowSum(A, NULL);
+    vtype localMax = deviceMax(sum->val, sum->n);
+    Vector::free(sum);
+    vtype ret;
+    CHECK_MPI(MPI_Allreduce(&localMax, &ret, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD));
+    return ret;
+}
+
 CSR* CSRm::copyToDevice(CSR* A)
 {
     assert(!A->on_the_device);
@@ -340,6 +657,8 @@ CSR* CSRm::copyToDevice(CSR* A)
     err = cudaMemcpy(A_d->val, A->val, nnz * sizeof(vtype), cudaMemcpyHostToDevice);
     CHECK_DEVICE(err);
     err = cudaMemcpy(A_d->row, A->row, (n + 1) * sizeof(itype), cudaMemcpyHostToDevice);
+    CHECK_DEVICE(err);
+    err = cudaMemcpy(A_d->col8, A->col8, nnz * sizeof(gsstype), cudaMemcpyHostToDevice);
     CHECK_DEVICE(err);
     err = cudaMemcpy(A_d->col, A->col, nnz * sizeof(itype), cudaMemcpyHostToDevice);
     CHECK_DEVICE(err);
@@ -380,9 +699,15 @@ CSR* CSRm::copyToHost(CSR* A_d)
     err = cudaMemcpy(A->col, A_d->col, nnz * sizeof(itype), cudaMemcpyDeviceToHost);
     CHECK_DEVICE(err);
 
+    if (A_d->col8) {
+        assert(A->col8);
+        err = cudaMemcpy(A->col8, A_d->col8, nnz * sizeof(gsstype), cudaMemcpyDeviceToHost);
+        CHECK_DEVICE(err);
+    }
+
     if (A_d->shrinked_m && A_d->shrinked_col) {
-        A->shrinked_col = MALLOC(itype, A_d->shrinked_m, false);
-        err = cudaMemcpy(A->shrinked_col, A_d->shrinked_col, A_d->shrinked_m * sizeof(itype), cudaMemcpyDeviceToHost);
+        A->shrinked_col = MALLOC(itype, nnz, false);
+        err = cudaMemcpy(A->shrinked_col, A_d->shrinked_col, nnz * sizeof(itype), cudaMemcpyDeviceToHost);
         CHECK_DEVICE(err);
     } else {
         A->shrinked_col = NULL;
@@ -403,24 +728,44 @@ __global__ void _shift_cols(itype n, itype* col, gsstype shift)
     col[i] = scratch;
 }
 
+__global__ void _shift_cols8(itype n, gsstype* col8, gsstype shift)
+{
+    itype i = blockDim.x * blockIdx.x + threadIdx.x;
+
+    if (i >= n) {
+        return;
+    }
+    gsstype scratch = col8[i];
+    scratch += shift;
+    col8[i] = scratch;
+}
+
 void CSRm::shift_cols(CSR* A, gsstype shift)
 {
-    assert(A->on_the_device);
-    GridBlock gb = gb1d(A->nnz, BLOCKSIZE);
-    _shift_cols<<<gb.g, gb.b>>>(A->nnz, A->col, shift);
-}
-
-void CSRm::shift_cols_nogpu(CSR* A, gsstype shift)
-{
-    assert(!A->on_the_device);
-
-    itype n = A->nnz;
-    for (itype i = 0; i < n; i++) {
-        gsstype scratch = A->col[i];
-        scratch += shift;
-        A->col[i] = scratch;
+    if (A->on_the_device) {
+        GridBlock gb = gb1d(A->nnz, BLOCKSIZE);
+        _shift_cols<<<gb.g, gb.b>>>(A->nnz, A->col, shift);
+        _shift_cols8<<<gb.g, gb.b>>>(A->nnz, A->col8, shift);
+    } else {
+        itype n = A->nnz;
+        for (itype i = 0; i < n; i++) {
+            A->col[i] += shift;
+            A->col8[i] += shift;
+        }
     }
 }
+
+// void CSRm::shift_cols_nogpu(CSR* A, gsstype shift)
+// {
+//     assert(!A->on_the_device);
+
+//     itype n = A->nnz;
+//     for (itype i = 0; i < n; i++) {
+//         gsstype scratch = A->col[i];
+//         scratch += shift;
+//         A->col[i] = scratch;
+//     }
+// }
 
 __global__ void _prepare_column_ptr(stype A_nrows, itype* A_row, itype* A_col, itype* T_row)
 {
@@ -620,7 +965,7 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp(CSR* A, vector<vtype>* 
     int density = A->nnz / A->n;
 
     int min_w_size;
-
+#if 0
     if (density < MINI_WARP_THRESHOLD_2) {
         min_w_size = 2;
     } else if (density < MINI_WARP_THRESHOLD_4) {
@@ -630,6 +975,13 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp(CSR* A, vector<vtype>* 
     } else {
         min_w_size = 16;
     }
+#else
+    if (density < MINI_WARP_THRESHOLD_8) {
+        min_w_size = 2;
+    } else {
+    	min_w_size = 4;
+    }
+#endif
 
     if (y == NULL) {
         assert(beta == 0.);
@@ -658,6 +1010,7 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_indirect_row_miniwarp(CSR* A, ve
 
     int min_w_size;
 
+#if 0
     if (density < MINI_WARP_THRESHOLD_2) {
         min_w_size = 2;
     } else if (density < MINI_WARP_THRESHOLD_4) {
@@ -667,6 +1020,14 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_indirect_row_miniwarp(CSR* A, ve
     } else {
         min_w_size = 16;
     }
+#else
+    if (density < MINI_WARP_THRESHOLD_8) {
+        min_w_size = 2;
+    } else {
+    	min_w_size = 4;
+    }
+#endif
+
 
     if (y == NULL) {
         assert(beta == 0.);
@@ -682,7 +1043,9 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_indirect_row_miniwarp(CSR* A, ve
     } else {
         CSRm::_CSR_vector_mul_mini_warp_indirect<0><<<gb.g, gb.b, 0, stream>>>(n, rows, offset, min_w_size, alpha, beta, A->val, A->row, A->col, x->val, y->val);
     }
+#if 0
     cudaStreamSynchronize(stream);
+#endif
     return y;
 }
 
@@ -694,6 +1057,7 @@ vector<vtype>* CSRm::CSRscale_adaptive_miniwarp(CSR* A, vector<vtype>* x, vector
 
     int min_w_size;
 
+#if 0
     if (density < MINI_WARP_THRESHOLD_2) {
         min_w_size = 2;
     } else if (density < MINI_WARP_THRESHOLD_4) {
@@ -703,6 +1067,13 @@ vector<vtype>* CSRm::CSRscale_adaptive_miniwarp(CSR* A, vector<vtype>* x, vector
     } else {
         min_w_size = 16;
     }
+#else
+    if (density < MINI_WARP_THRESHOLD_8) {
+        min_w_size = 2;
+    } else {
+    	min_w_size = 4;
+    }
+#endif
 
     if (y == NULL) {
         assert(beta == 0.);
@@ -753,6 +1124,9 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp_new(CSR* A, vector<vtyp
         } else {
             w_ = w;
         }
+        if (A->shrinked_flag == 1) {
+            A->col = A->shrinked_col;
+        }
         CSRm::CSRVector_product_adaptive_miniwarp(A, local_x, w_, alpha, beta);
         END_PROF(__FUNCTION__);
         return (w_);
@@ -779,8 +1153,21 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp_new(CSR* A, vector<vtyp
             xvalstat = CUDA_MALLOC(vtype, xsize, true);
         }
         x_->val = xvalstat;
+
+        // ===============================================================
+        // stype nr_of_cols = A->n;
+        // if (A->full_n < A->m) {
+        //     nr_of_cols = A->m / nprocs;
+        //     if (myid == nprocs - 1) {
+        //         nr_of_cols += A->m % nprocs;
+        //     }
+        // }
+
+        stype nr_of_cols = x_->n - A->halo.to_receive_d->n;
+        // ===============================================================
+        ASSERT(nr_of_cols + A->halo.to_receive_d->n == x_->n);
         GridBlock gb = gb1d(A_->m, BLOCKSIZE);
-        _vector_sync<<<gb.g, gb.b>>>(local_x->val, A->n, A->halo.what_to_receive_d, A->halo.to_receive_d->n, post_local, x_->val, x_->n);
+        _vector_sync<<<gb.g, gb.b>>>(local_x->val, nr_of_cols, A->halo.what_to_receive_d, A->halo.to_receive_d->n, post_local, x_->val, x_->n);
     } else {
         x_ = local_x;
     }
@@ -826,11 +1213,17 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp_new(CSR* A, vector<vtyp
 #define MAXNTASKS 4096
 #define USESTREAM 1
 
+#if DEBUG
+vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp_witho(CSR* A, vector<vtype>* local_x, vector<vtype>* w, vtype alpha, vtype beta, const nostd::source_location& loc)
+#else
 vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp_witho(CSR* A, vector<vtype>* local_x, vector<vtype>* w, vtype alpha, vtype beta)
+#endif
 {
     BEGIN_PROF(__FUNCTION__);
 
     _MPI_ENV;
+
+    // fprintf(stderr, "myid = %d, A->name = %s, full_n = %d, m = %d\n", myid, A->name, A->full_n, A->m);
 
     if (nprocs == 1) {
         vector<vtype>* w_ = NULL;
@@ -839,6 +1232,9 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp_witho(CSR* A, vector<vt
             Vector::fillWithValue(w_, 0.);
         } else {
             w_ = w;
+        }
+        if (A->shrinked_flag == 1) {
+            A->col = A->shrinked_col;
         }
         CSRm::CSRVector_product_adaptive_miniwarp(A, local_x, w_, alpha, beta);
         END_PROF(__FUNCTION__);
@@ -925,9 +1321,7 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp_witho(CSR* A, vector<vt
                 MPI_Irecv(hi.what_to_receive + (hi.to_receive_spls[t]), hi.to_receive_counts[t], VTYPE_MPI, t, SYNCSOL_TAG, MPI_COMM_WORLD, requests + j));
             j++;
             if (j == MAXNTASKS) {
-                fprintf(stderr, "Too many tasks in matrix-vector product, max is %d\n",
-                    MAXNTASKS);
-                exit(1);
+                DIE("Too many tasks in matrix-vector product, max is %d\n", MAXNTASKS);
             }
         }
     }
@@ -953,12 +1347,63 @@ vector<vtype>* CSRm::CSRVector_product_adaptive_miniwarp_witho(CSR* A, vector<vt
         }
         assert(hi.what_to_receive != NULL);
         assert(hi.what_to_receive_d != NULL);
-        GridBlock gb = gb1d(A_->m, BLOCKSIZE);
+        
 #if defined(USESTREAM)
         CHECK_DEVICE(cudaMemcpyAsync(hi.what_to_receive_d, hi.what_to_receive, hi.to_receive_n * sizeof(vtype), cudaMemcpyHostToDevice, *(os.streams->comm_stream)));
-        _vector_sync<<<gb.g, gb.b, 0, *(os.streams->comm_stream)>>>(local_x->val, A->n, A->halo.what_to_receive_d, A->halo.to_receive_d->n, post_local, x_->val, x_->n);
+        #if DEBUG
+        {
+            const char *mat_name = strlen(A->name) ? A->name : (
+                (A->full_n == A->m) ? "Aded" :
+                (A->full_n > A->m ? "Pded" : "Rded"));
+            fprintf(stderr,
+                "[%s:%d] myid = %d, %s = %p, full_n = %d, m = %d, shrinked_m = %d, n = %d, halo.to_receive_d->n = %d, x_->n = %d, post_local = %d, local_x->val = %p, halo.what_to_receive_d = %p, x_->val = %p\n",
+                loc.file_name(), loc.line(), myid, mat_name, A, A->full_n, A->m, A->shrinked_m, A->n, A->halo.to_receive_d->n, x_->n, post_local, local_x->val, A->halo.what_to_receive_d, x_->val
+            );
+        }
+        #endif
+
+        // ===============================================================
+        // stype nr_of_cols = A->n;
+        // if (A->full_n != A->m) {
+        //     nr_of_cols = A->m / nprocs;
+        //     if (myid == nprocs - 1) {
+        //         nr_of_cols += A->m % nprocs;
+        //     }
+        // }
+
+        stype nr_of_cols = x_->n - A->halo.to_receive_d->n;
+
+        // ===============================================================
+        // if (nr_of_cols + A->halo.to_receive_d->n != x_->n) {
+        //     if (strlen(A->name)) {
+        //         fprintf(stderr, "MPI[%d] Before _vector_sync on %s\n", myid, A->name);
+        //     } else {
+        //         fprintf(stderr, "MPI[%d] Before _vector_sync on %p\n", myid, A);
+        //     }
+        // }
+        // #if 1
+        // if (nr_of_cols + A->halo.to_receive_d->n != x_->n)
+        // {
+        //     fprintf(stderr, "myid = %d, ", myid);
+        //     if (A->name) {
+        //         fprintf(stderr, "A->name = %s, ", A->name);
+        //     } else {
+        //         fprintf(stderr, "A = %p, ", A);
+        //     }
+        //     fprintf(stderr, "A->n = %u, A->full_n = %lu, A->m = %lu, A->row_shift = %lu\n", A->n, A->full_n, A->m, A->row_shift);
+        //     fprintf(stderr, "A->halo.to_receive_n = %d, A_->m = %lu, local_x->n = %d, post_local = %d, bitcolsize = %d\n", A->halo.to_receive_n, A_->m, local_x->n, post_local, A->bitcolsize);
+        //     fprintf(stderr, "nr_of_cols (%u) + A->halo.to_receive_d->n (%d) = %d, x_->n = %d\n",
+        //         nr_of_cols, A->halo.to_receive_d->n, nr_of_cols + A->halo.to_receive_d->n, x_->n);
+        //     // debugArray("x[%d] = %lf\n", x_->val, x_->n, x_->on_the_device, stderr);
+        //     // debugArray("to_receive_d[%d] = %d\n", A->halo.to_receive_d->val, A->halo.to_receive_d->n, A->halo.to_receive_d->on_the_device, stderr);
+        // }
+        // #endif
+        // ASSERT(nr_of_cols + A->halo.to_receive_d->n == x_->n);
+        GridBlock gb = gb1d(A_->m, BLOCKSIZE);
+        _vector_sync<<<gb.g, gb.b, 0, *(os.streams->comm_stream)>>>(local_x->val, nr_of_cols, A->halo.what_to_receive_d, A->halo.to_receive_d->n, post_local, x_->val, x_->n);
 #else
         CHECK_DEVICE(cudaMemcpy(hi.what_to_receive_d, hi.what_to_receive, hi.to_receive_n * sizeof(vtype), cudaMemcpyHostToDevice));
+        GridBlock gb = gb1d(A_->m, BLOCKSIZE);
         _vector_sync<<<gb.g, gb.b>>>(local_x->val, A->n, A->halo.what_to_receive_d, A->halo.to_receive_d->n, post_local, x_->val, x_->n);
 #endif
         // complete computation for halo
@@ -996,6 +1441,9 @@ vector<vtype>* CSRm::CSRscaleA_0(CSR* A, vector<vtype>* local_x, vector<vtype>* 
         } else {
             w_ = w;
         }
+        if (A->shrinked_flag == 1) {
+            A->col = A->shrinked_col;
+        }
         CSRm::CSRscale_adaptive_miniwarp(A, local_x, w_, alpha, beta);
         return (w_);
     }
@@ -1021,6 +1469,8 @@ vector<vtype>* CSRm::CSRscaleA_0(CSR* A, vector<vtype>* local_x, vector<vtype>* 
             xvalstat = CUDA_MALLOC(vtype, xsize, true);
         }
         x_->val = xvalstat;
+        
+        ASSERT(A->n + A->halo.to_receive_d->n == x_->n);
         GridBlock gb = gb1d(A_->m, BLOCKSIZE);
         _vector_sync<<<gb.g, gb.b>>>(local_x->val, A->n, A->halo.what_to_receive_d, A->halo.to_receive_d->n, post_local, x_->val, x_->n);
     } else {
@@ -1062,6 +1512,9 @@ vector<vtype>* CSRm::CSRscaleA_0IP(CSR* A, vector<vtype>* local_x, vtype alpha, 
         } else {
             w_ = w;
         }
+        if (A->shrinked_flag == 1) {
+            A->col = A->shrinked_col;
+        }
         CSRm::CSRscale_adaptive_miniwarp(A, local_x, w_, alpha, beta);
         return (w_);
     }
@@ -1087,6 +1540,8 @@ vector<vtype>* CSRm::CSRscaleA_0IP(CSR* A, vector<vtype>* local_x, vtype alpha, 
             xvalstat = CUDA_MALLOC(vtype, xsize, true);
         }
         x_->val = xvalstat;
+
+        ASSERT(A->n + A->halo.to_receive_d->n == x_->n);
         GridBlock gb = gb1d(A_->m, BLOCKSIZE);
         _vector_sync<<<gb.g, gb.b>>>(local_x->val, A->n, A->halo.what_to_receive_d, A->halo.to_receive_d->n, post_local, x_->val, x_->n);
     } else {
@@ -1164,6 +1619,7 @@ vector<vtype>* CSRm::shifted_CSRVector_product_adaptive_miniwarp(CSR* A, vector<
 
     int min_w_size;
 
+#if 0
     if (density < MINI_WARP_THRESHOLD_2) {
         min_w_size = 2;
     } else if (density < MINI_WARP_THRESHOLD_4) {
@@ -1173,6 +1629,14 @@ vector<vtype>* CSRm::shifted_CSRVector_product_adaptive_miniwarp(CSR* A, vector<
     } else {
         min_w_size = 16;
     }
+#else
+    if (density < MINI_WARP_THRESHOLD_8) {
+        min_w_size = 2;
+    } else {
+    	min_w_size = 4;
+    }
+#endif
+
 
     if (y == NULL) {
         assert(beta == 0.);
@@ -1230,6 +1694,7 @@ vector<vtype>* CSRm::shifted_CSRVector_product_adaptive_miniwarp2(CSR* A, vector
 
     int min_w_size;
 
+#if 0
     if (density < MINI_WARP_THRESHOLD_2) {
         min_w_size = 2;
     } else if (density < MINI_WARP_THRESHOLD_4) {
@@ -1239,6 +1704,14 @@ vector<vtype>* CSRm::shifted_CSRVector_product_adaptive_miniwarp2(CSR* A, vector
     } else {
         min_w_size = 16;
     }
+#else
+    if (density < MINI_WARP_THRESHOLD_8) {
+        min_w_size = 2;
+    } else {
+    	min_w_size = 4;
+    }
+#endif
+
 
     if (y == NULL) {
         assert(beta == 0.);
@@ -1440,15 +1913,13 @@ void CSRm::checkColumnsOrder(CSR* A_)
             itype c = A->col[j];
 
             if (c < _c) {
-                printf("WRONG ORDER COLUMNS: %d %d-%d\n", i, c, _c);
-                exit(1);
+                DIE("WRONG ORDER COLUMNS: %d %d-%d\n", i, c, _c);
             }
             if (c > _c) {
                 _c = c;
             }
             if (c > A->m - 1) {
-                printf("WRONG COLUMN TO BIG: %d %d-%d\n", i, c, _c);
-                exit(1);
+                DIE("WRONG COLUMN TO BIG: %d %d-%d\n", i, c, _c);
             }
         }
     }
@@ -1479,15 +1950,13 @@ void CSRm::checkMatrix(CSR* A_, bool check_diagonal)
                     found = 1;
                     vtype diff = abs(v - A->val[jj]);
                     if (A->val[jj] != v && diff >= MY_EPSILON) {
-                        printf("\n\nNONSYM %lf %lf %lf\n\n", v, A->val[jj], diff);
-                        exit(1);
+                        DIE("\n\nNONSYM %lf %lf %lf\n\n", v, A->val[jj], diff);
                     }
                     break;
                 }
             }
             if (!found) {
-                printf("BAD[%d]: %d %d\n", myid, i, c);
-                exit(1);
+                DIE("BAD[%d]: %d %d\n", myid, i, c);
             }
         }
     }
@@ -1506,8 +1975,7 @@ void CSRm::checkMatrix(CSR* A_, bool check_diagonal)
                 }
             }
             if (!found) {
-                printf("MISSING ELEMENT DIAG %d\n", i);
-                exit(1);
+                DIE("MISSING ELEMENT DIAG %d\n", i);
             }
         }
         if (A_->on_the_device) {
@@ -1560,9 +2028,11 @@ matrixItem_t* CSRm::collectMatrixItems(CSR* dlA, FILE* debug, bool useColShift)
     cudaError_t err = cudaDeviceSynchronize();
     CHECK_DEVICE(err);
 
+    #if DEBUG
     if (debug) {
         debugMatrixItems("nnzItems", d_nnzItems, dlA->nnz, true, debug);
     }
+    #endif
 
     return d_nnzItems;
 }
@@ -1584,166 +2054,371 @@ matrixItem_t* CSRm::collectMatrixItems_nogpu(CSR* dlA, FILE* debug, bool useColS
         }
     }
 
+    #if DEBUG
     if (debug) {
         debugMatrixItems("nnzItems", d_nnzItems, dlA->nnz, false, debug);
     }
+    #endif
 
     return d_nnzItems;
 }
+
+// /**
+//  * @param dlA device local A
+//  * @param f process-specific log file
+//  */
+// CSR* CSRm::transpose_old(CSR* dlA, FILE* f, const char* shape)
+// {
+//     assert(dlA->on_the_device);
+
+//     _MPI_ENV;
+
+//     if (f) {
+//         fprintf(f, "[Process %d] n (rows) : %d\n", myid, dlA->n);
+//         fprintf(f, "[Process %d] m (cols) : %lu\n", myid, dlA->m);
+//         fprintf(f, "[Process %d] nnz      : %d\n", myid, dlA->nnz);
+//         fprintf(f, "[Process %d] row shift: %lu\n", myid, dlA->row_shift);
+//     }
+
+//     // Register custom MPI datatypes
+//     // ---------------------------------------------------------------------------
+//     registerMatrixItemMpiDatatypes();
+
+//     // Collect non-zero items in dlA
+//     // ---------------------------------------------------------------------------
+//     matrixItem_t* d_nnzItems = collectMatrixItems(dlA, f, true);
+
+//     // Identify the items to be sent: they are the ones whose column
+//     // index is before the first row index assigned to the process or
+//     // after the last row assigned to the process.
+//     // ---------------------------------------------------------------------------
+
+//     size_t nnzItemsToBeSentSize = 0;
+//     matrixItem_t* d_nnzItemsToBeSent = devicePartition(
+//         d_nnzItems,
+//         dlA->nnz,
+//         MatrixItemColumnIndexOutOfBoundsSelector(
+//             dlA->row_shift,
+//             dlA->row_shift + dlA->n - 1),
+//         &nnzItemsToBeSentSize);
+
+//     if (f) {
+//         fprintf(f, "nnzItemsToBeSent effective size: %zu\n", nnzItemsToBeSentSize);
+//         debugMatrixItems("nnzItemsToBeSent", d_nnzItemsToBeSent, nnzItemsToBeSentSize, true, f);
+//     }
+
+//     // Identify the items not to be requested: they are the ones whose column
+//     // index is between the first row index and the last row index
+//     // assigned to the process.
+//     // ---------------------------------------------------------------------------
+//     matrixItem_t* d_nnzItemsNotToBeSent = d_nnzItemsToBeSent + nnzItemsToBeSentSize;
+//     size_t nnzItemsNotToBeSentSize = dlA->nnz - nnzItemsToBeSentSize;
+
+//     if (f) {
+//         fprintf(f, "nnzItemsNotToBeSent effective size: %zu\n", nnzItemsNotToBeSentSize);
+//         debugMatrixItems("nnzItemsNotToBeSent", d_nnzItemsNotToBeSent, nnzItemsNotToBeSentSize, true, f);
+//     }
+
+//     // Release memory
+//     // ---------------------------------------------------------------------------
+//     CUDA_FREE(d_nnzItems);
+
+//     // Copy data to host in order to perform MPI communication
+//     // ---------------------------------------------------------------------------
+//     matrixItem_t* h_nnzItemsToBeSent = copyArrayToHost(d_nnzItemsToBeSent, nnzItemsToBeSentSize);
+
+//     // Exchange data with other processes
+//     // ---------------------------------------------------------------------------
+//     ProcessSelector processSelector(dlA, f);
+//     MatrixItemSender itemSender(&processSelector, f);
+//     MpiBuffer<matrixItem_t> sendBuffer;
+//     MpiBuffer<matrixItem_t> rcvBuffer;
+//     itemSender.send(h_nnzItemsToBeSent, nnzItemsToBeSentSize,
+//         &sendBuffer, &rcvBuffer);
+
+//     // Now we have all the initially missing values in rcv_buffer and all the
+//     // initially interesting values in nnzItemsNotToBeSent. We need
+//     // to construct a new (transposed) matrix from all those values.
+//     // ---------------------------------------------------------------------------
+//     size_t concatenatedSize = rcvBuffer.size + nnzItemsNotToBeSentSize;
+
+//     matrixItem_t* d_concatenated = concatArrays<matrixItem_t>(
+//         rcvBuffer.buffer, // arr1
+//         rcvBuffer.size, // len1
+//         false, // onDevice1
+//         d_nnzItemsToBeSent + nnzItemsToBeSentSize, // arr2
+//         nnzItemsNotToBeSentSize, // len2
+//         true, // onDevice2
+//         true // retOnDevice
+//     );
+
+//     if (f) {
+//         fprintf(f, "concatenatedItems effective size: %zu\n", concatenatedSize);
+//         debugMatrixItems("concatenatedItems", d_concatenated, concatenatedSize, true, f);
+//     }
+
+//     // Release memory
+//     // ---------------------------------------------------------------------------
+//     CUDA_FREE(d_nnzItemsToBeSent);
+//     FREE(h_nnzItemsToBeSent);
+
+//     // Sort items by col, row (pratically: already transposed)
+//     // ---------------------------------------------------------------------------
+//     deviceSort<matrixItem_t, gstype, MatrixItemTransposedComparator>(d_concatenated, concatenatedSize, MatrixItemTransposedComparator(dlA->full_n));
+
+//     if (f) {
+//         debugMatrixItems("sortedItems", d_concatenated, concatenatedSize, true, f);
+//     }
+
+//     if (!concatenatedSize) {
+//         fprintf(f ? f : stderr, "concatenatedSize in process %d is 0. Row shift: %ld, n: %d\n", myid, dlA->row_shift, dlA->n);
+//     }
+
+//     // Create new CSR matrix
+//     // ---------------------------------------------------------------------------
+//     bool is_rectangular = !strncasecmp("R", shape, 1);
+//     CSR* d_transposed = CSRm::init(
+//         is_rectangular ? dlA->m : dlA->n, // Nr of rows,
+//         is_rectangular ? dlA->full_n : dlA->full_n, // Nr of columns,
+//         concatenatedSize, // nnz
+//         true, // Allocate memory
+//         true, // On the device
+//         false, // Is symmetric?
+//         is_rectangular ? dlA->m : dlA->full_n,
+//         dlA->row_shift);
+
+//     // Fill CSR
+//     // ---------------------------------------------------------------------------
+//     fillCsrFromMatrixItems(
+//         d_concatenated,
+//         concatenatedSize,
+//         d_transposed->n,
+//         d_transposed->row_shift,
+//         &(d_transposed->row),
+//         &(d_transposed->col),
+//         &(d_transposed->col8),
+//         &(d_transposed->val),
+//         true, // Transposed
+//         false // Allocate memory
+//     );
+
+//     if (f) {
+//         debugArray("d_transposed->row[%d] = %d\n", d_transposed->row, d_transposed->n + 1, true, f);
+//         debugArray("d_transposed->col[%d] = %d\n", d_transposed->col, d_transposed->nnz, true, f);
+//         debugArray("d_transposed->col8[%d] = %ld\n", d_transposed->col8, d_transposed->nnz, true, f);
+//         debugArray("d_transposed->val[%d] = %lf\n", d_transposed->val, d_transposed->nnz, true, f);
+//     }
+
+//     CUDA_FREE(d_concatenated);
+
+//     if (d_transposed->row_shift) {
+//         CSRm::shift_cols(d_transposed, -d_transposed->row_shift);
+//         d_transposed->col_shifted = -d_transposed->row_shift;
+//     }
+
+//     return d_transposed;
+// }
+
+// #undef DEBUG
+// #define DEBUG 1
 
 /**
  * @param dlA device local A
  * @param f process-specific log file
  */
-CSR* CSRm::transpose(CSR* dlA, FILE* f, const char* shape)
-{
-    assert(dlA->on_the_device);
+ CSR* CSRm::transpose(CSR* dlA, FILE* f)
+ {
+     assert(dlA->on_the_device);
+ 
+     _MPI_ENV;
+ 
+     // Compute transposed matrix properties
+     // ---------------------------------------------------------------------------
+     gstype full_n = dlA->m;
+     stype n = full_n / nprocs;
+     gstype m = dlA->full_n;
+     gstype row_shift = n * (taskmap ? itaskmap[myid] : myid);
+     if (myid == nprocs - 1) {
+        n += full_n % nprocs;
+     }
+     
+     #if DEBUG
+     if (f) {
+        fprintf(f, "Inside %s\n", __func__);
+        fprintf(f, "[Process %d] A->n (rows) : %d\n" , myid, dlA->n);
+        fprintf(f, "[Process %d] A->full_n (rows) : %d\n" , myid, dlA->full_n);
+        fprintf(f, "[Process %d] A->m (cols) : %lu\n", myid, dlA->m);
+        fprintf(f, "[Process %d] A->nnz      : %d\n" , myid, dlA->nnz);
+        fprintf(f, "[Process %d] A->row shift: %lu\n", myid, dlA->row_shift);
 
-    _MPI_ENV;
-
-    if (f) {
-        fprintf(f, "[Process %d] n (rows) : %d\n" , myid, dlA->n);
-        fprintf(f, "[Process %d] m (cols) : %lu\n", myid, dlA->m);
-        fprintf(f, "[Process %d] nnz      : %d\n" , myid, dlA->nnz);
-        fprintf(f, "[Process %d] row shift: %lu\n", myid, dlA->row_shift);
+        fprintf(f, "[Process %d] T->n (rows) : %d\n" , myid, n);
+        fprintf(f, "[Process %d] T->full_n (rows) : %d\n" , myid, full_n);
+        fprintf(f, "[Process %d] T->m (cols) : %lu\n", myid, m);
+        fprintf(f, "[Process %d] T->row shift: %lu\n", myid, row_shift);
     }
+    #endif
 
-    // Register custom MPI datatypes
-    // ---------------------------------------------------------------------------
-    registerMatrixItemMpiDatatypes();
+     // Register custom MPI datatypes
+     // ---------------------------------------------------------------------------
+     registerMatrixItemMpiDatatypes();
+ 
+     // Collect non-zero items in dlA
+     // ---------------------------------------------------------------------------
+     matrixItem_t* d_nnzItems = collectMatrixItems(dlA, f, true);
+ 
+     // Identify the items to be sent: they are the ones whose column
+     // index is before the first row index assigned to the process or
+     // after the last row assigned to the process.
+     // ---------------------------------------------------------------------------
+ 
+     size_t nnzItemsToBeSentSize = 0;
+     matrixItem_t* d_nnzItemsToBeSent = devicePartition(
+         d_nnzItems,
+         dlA->nnz,
+         MatrixItemColumnIndexOutOfBoundsSelector(
+             row_shift,
+             row_shift + n - 1),
+         &nnzItemsToBeSentSize);
+ 
+     #if DEBUG
+     if (f) {
+         fprintf(f, "nnzItemsToBeSent effective size: %zu\n", nnzItemsToBeSentSize);
+         debugMatrixItems("nnzItemsToBeSent", d_nnzItemsToBeSent, nnzItemsToBeSentSize, true, f);
+     }
+     #endif
+ 
+     // Identify the items not to be requested: they are the ones whose column
+     // index is between the first row index and the last row index
+     // assigned to the process.
+     // ---------------------------------------------------------------------------
+     matrixItem_t* d_nnzItemsNotToBeSent = d_nnzItemsToBeSent + nnzItemsToBeSentSize;
+     size_t nnzItemsNotToBeSentSize = dlA->nnz - nnzItemsToBeSentSize;
+ 
+     #if DEBUG
+     if (f) {
+         fprintf(f, "nnzItemsNotToBeSent effective size: %zu\n", nnzItemsNotToBeSentSize);
+         debugMatrixItems("nnzItemsNotToBeSent", d_nnzItemsNotToBeSent, nnzItemsNotToBeSentSize, true, f);
+     }
+     #endif
+ 
+     // Release memory
+     // ---------------------------------------------------------------------------
+     CUDA_FREE(d_nnzItems);
+ 
+     // Copy data to host in order to perform MPI communication
+     // ---------------------------------------------------------------------------
+     matrixItem_t* h_nnzItemsToBeSent = copyArrayToHost(d_nnzItemsToBeSent, nnzItemsToBeSentSize);
+ 
+     // Exchange data with other processes
+     // ---------------------------------------------------------------------------
+     ProcessSelector processSelector(full_n, f);
+     MatrixItemSender itemSender(&processSelector, f);
+     MpiBuffer<matrixItem_t> sendBuffer;
+     MpiBuffer<matrixItem_t> rcvBuffer;
+     itemSender.send(h_nnzItemsToBeSent, nnzItemsToBeSentSize,
+         &sendBuffer, &rcvBuffer);
+ 
+     // Now we have all the initially missing values in rcv_buffer and all the
+     // initially interesting values in nnzItemsNotToBeSent. We need
+     // to construct a new (transposed) matrix from all those values.
+     // ---------------------------------------------------------------------------
+     size_t concatenatedSize = rcvBuffer.size + nnzItemsNotToBeSentSize;
+ 
+     matrixItem_t* d_concatenated = concatArrays<matrixItem_t>(
+         rcvBuffer.buffer, // arr1
+         rcvBuffer.size, // len1
+         false, // onDevice1
+         d_nnzItemsToBeSent + nnzItemsToBeSentSize, // arr2
+         nnzItemsNotToBeSentSize, // len2
+         true, // onDevice2
+         true // retOnDevice
+     );
+ 
+     #if DEBUG
+     if (f) {
+         fprintf(f, "concatenatedItems effective size: %zu\n", concatenatedSize);
+         debugMatrixItems("concatenatedItems", d_concatenated, concatenatedSize, true, f);
+     }
+     #endif
+ 
+     // Release memory
+     // ---------------------------------------------------------------------------
+     CUDA_FREE(d_nnzItemsToBeSent);
+     FREE(h_nnzItemsToBeSent);
+ 
+     // Sort items by col, row (pratically: already transposed)
+     // ---------------------------------------------------------------------------
+     deviceSort<matrixItem_t, gstype, MatrixItemTransposedComparator>(d_concatenated, concatenatedSize, MatrixItemTransposedComparator(dlA->full_n));
+ 
+     #if DEBUG
+     if (f) {
+         debugMatrixItems("sortedItems", d_concatenated, concatenatedSize, true, f);
+     }
+ 
+     if (!concatenatedSize) {
+         fprintf(f ? f : stderr, "concatenatedSize in process %d is 0. Row shift: %ld, n: %d\n", myid, dlA->row_shift, dlA->n);
+     }
+     #endif
+ 
+     // Create new CSR matrix
+     // ---------------------------------------------------------------------------
+    //  bool is_rectangular = !strncasecmp("R", shape, 1);
+    //  CSR* d_transposed = CSRm::init(
+    //      is_rectangular ? dlA->m : dlA->n, // Nr of rows,
+    //      is_rectangular ? dlA->full_n : dlA->full_n, // Nr of columns,
+    //      concatenatedSize, // nnz
+    //      true, // Allocate memory
+    //      true, // On the device
+    //      false, // Is symmetric?
+    //      is_rectangular ? dlA->m : dlA->full_n,
+    //      dlA->row_shift);
 
-    // Collect non-zero items in dlA
-    // ---------------------------------------------------------------------------
-    matrixItem_t* d_nnzItems = collectMatrixItems(dlA, f, true);
-
-    // Identify the items to be sent: they are the ones whose column
-    // index is before the first row index assigned to the process or
-    // after the last row assigned to the process.
-    // ---------------------------------------------------------------------------
-
-    size_t nnzItemsToBeSentSize = 0;
-    matrixItem_t* d_nnzItemsToBeSent = devicePartition(
-        d_nnzItems,
-        dlA->nnz,
-        MatrixItemColumnIndexOutOfBoundsSelector(
-            dlA->row_shift,
-            dlA->row_shift + dlA->n - 1),
-        &nnzItemsToBeSentSize);
-
-    if (f) {
-        fprintf(f, "nnzItemsToBeSent effective size: %zu\n", nnzItemsToBeSentSize);
-        debugMatrixItems("nnzItemsToBeSent", d_nnzItemsToBeSent, nnzItemsToBeSentSize, true, f);
-    }
-
-    // Identify the items not to be requested: they are the ones whose column
-    // index is between the first row index and the last row index
-    // assigned to the process.
-    // ---------------------------------------------------------------------------
-    matrixItem_t* d_nnzItemsNotToBeSent = d_nnzItemsToBeSent + nnzItemsToBeSentSize;
-    size_t nnzItemsNotToBeSentSize = dlA->nnz - nnzItemsToBeSentSize;
-
-    if (f) {
-        fprintf(f, "nnzItemsNotToBeSent effective size: %zu\n", nnzItemsNotToBeSentSize);
-        debugMatrixItems("nnzItemsNotToBeSent", d_nnzItemsNotToBeSent, nnzItemsNotToBeSentSize, true, f);
-    }
-
-    // Release memory
-    // ---------------------------------------------------------------------------
-    CUDA_FREE(d_nnzItems);
-
-    // Copy data to host in order to perform MPI communication
-    // ---------------------------------------------------------------------------
-    matrixItem_t* h_nnzItemsToBeSent = copyArrayToHost(d_nnzItemsToBeSent, nnzItemsToBeSentSize);
-
-    // Exchange data with other processes
-    // ---------------------------------------------------------------------------
-    ProcessSelector processSelector(dlA, f);
-    MatrixItemSender itemSender(&processSelector, f);
-    MpiBuffer<matrixItem_t> sendBuffer;
-    MpiBuffer<matrixItem_t> rcvBuffer;
-    itemSender.send(h_nnzItemsToBeSent, nnzItemsToBeSentSize,
-        &sendBuffer, &rcvBuffer);
-
-    // Now we have all the initially missing values in rcv_buffer and all the
-    // initially interesting values in nnzItemsNotToBeSent. We need
-    // to construct a new (transposed) matrix from all those values.
-    // ---------------------------------------------------------------------------
-    size_t concatenatedSize = rcvBuffer.size + nnzItemsNotToBeSentSize;
-
-    matrixItem_t* d_concatenated = concatArrays<matrixItem_t>(
-        rcvBuffer.buffer, // arr1
-        rcvBuffer.size, // len1
-        false, // onDevice1
-        d_nnzItemsToBeSent + nnzItemsToBeSentSize, // arr2
-        nnzItemsNotToBeSentSize, // len2
-        true, // onDevice2
-        true // retOnDevice
-    );
-
-    if (f) {
-        fprintf(f, "concatenatedItems effective size: %zu\n", concatenatedSize);
-        debugMatrixItems("concatenatedItems", d_concatenated, concatenatedSize, true, f);
-    }
-
-    // Release memory
-    // ---------------------------------------------------------------------------
-    CUDA_FREE(d_nnzItemsToBeSent);
-    FREE(h_nnzItemsToBeSent);
-
-    // Sort items by col, row (pratically: already transposed)
-    // ---------------------------------------------------------------------------
-    deviceSort<matrixItem_t, gstype, MatrixItemTransposedComparator>(d_concatenated, concatenatedSize, MatrixItemTransposedComparator(dlA->full_n));
-
-    if (f) {
-        debugMatrixItems("sortedItems", d_concatenated, concatenatedSize, true, f);
-    }
-
-    if (!concatenatedSize) {
-        fprintf(f ? f : stderr, "concatenatedSize in process %d is 0. Row shift: %ld, n: %d\n", myid, dlA->row_shift, dlA->n);
-    }
-
-    // Create new CSR matrix
-    // ---------------------------------------------------------------------------
-    bool is_rectangular = !strncasecmp("R", shape, 1);
     CSR* d_transposed = CSRm::init(
-        is_rectangular ? dlA->m : dlA->n, // Nr of rows,
-        is_rectangular ? dlA->full_n : dlA->full_n, // Nr of columns,
+        n, // Nr of rows,
+        m, // Nr of columns,
         concatenatedSize, // nnz
         true, // Allocate memory
         true, // On the device
         false, // Is symmetric?
-        is_rectangular ? dlA->m : dlA->full_n,
-        dlA->row_shift);
+        full_n,
+        row_shift);
+ 
+     // Fill CSR
+     // ---------------------------------------------------------------------------
+     fillCsrFromMatrixItems(
+         d_concatenated,
+         concatenatedSize,
+         d_transposed->n,
+         d_transposed->row_shift,
+         &(d_transposed->row),
+         &(d_transposed->col),
+         &(d_transposed->col8),
+         &(d_transposed->val),
+         true, // Transposed
+         false // Allocate memory
+     );
+ 
+     #if DEBUG
+     if (f) {
+         debugArray("d_transposed->row[%d] = %d\n", d_transposed->row, d_transposed->n + 1, true, f);
+         debugArray("d_transposed->col[%d] = %d\n", d_transposed->col, d_transposed->nnz, true, f);
+         debugArray("d_transposed->col8[%d] = %ld\n", d_transposed->col8, d_transposed->nnz, true, f);
+         debugArray("d_transposed->val[%d] = %lf\n", d_transposed->val, d_transposed->nnz, true, f);
+     }
+     #endif
+ 
+     CUDA_FREE(d_concatenated);
+ 
+     if (d_transposed->row_shift) {
+         CSRm::shift_cols(d_transposed, -d_transposed->row_shift);
+         d_transposed->col_shifted = -d_transposed->row_shift;
+     }
+ 
+     return d_transposed;
+ }
 
-    // Fill CSR
-    // ---------------------------------------------------------------------------
-    fillCsrFromMatrixItems(
-        d_concatenated,
-        concatenatedSize,
-        d_transposed->n,
-        d_transposed->row_shift,
-        &(d_transposed->row),
-        &(d_transposed->col),
-        &(d_transposed->val),
-        true, // Transposed
-        false // Allocate memory
-    );
-
-    if (f) {
-        debugArray("d_transposed->row[%d] = %d\n", d_transposed->row, d_transposed->n + 1, true, f);
-        debugArray("d_transposed->col[%d] = %d\n", d_transposed->col, d_transposed->nnz, true, f);
-        debugArray("d_transposed->val[%d] = %lf\n", d_transposed->val, d_transposed->nnz, true, f);
-    }
-
-    CUDA_FREE(d_concatenated);
-
-    if (d_transposed->row_shift) {
-        CSRm::shift_cols(d_transposed, -d_transposed->row_shift);
-        d_transposed->col_shifted = -d_transposed->row_shift;
-    }
-
-    return d_transposed;
-}
+//  #undef DEBUG
+//  #define DEBUG 0
 
 /**
  * @param dlA device local A
@@ -1755,12 +2430,15 @@ CSR* CSRm::Transpose_local(CSR* dlA, FILE* f)
 
     _MPI_ENV;
 
+    #if DEBUG
     if (f) {
+        fprintf(f, "Inside %s\n", __func__);
         fprintf(f, "n (rows) : %d\n", dlA->n);
         fprintf(f, "m (cols) : %lu\n", dlA->m);
         fprintf(f, "nnz      : %d\n", dlA->nnz);
         fprintf(f, "row shift: %lu\n", dlA->row_shift);
     }
+    #endif
 
     // Register custom MPI datatypes
     // ---------------------------------------------------------------------------
@@ -1774,9 +2452,11 @@ CSR* CSRm::Transpose_local(CSR* dlA, FILE* f)
     // ---------------------------------------------------------------------------
     deviceSort<matrixItem_t, gstype, MatrixItemTransposedComparator>(d_nnzItems, dlA->nnz, MatrixItemTransposedComparator(dlA->n));
 
+    #if DEBUG
     if (f) {
         debugMatrixItems("sortedItems", d_nnzItems, dlA->nnz, true, f);
     }
+    #endif
 
     // Create new CSR matrix
     // ---------------------------------------------------------------------------
@@ -1799,16 +2479,20 @@ CSR* CSRm::Transpose_local(CSR* dlA, FILE* f)
         d_transposed->row_shift,
         &(d_transposed->row),
         &(d_transposed->col),
+        &(d_transposed->col8),
         &(d_transposed->val),
         true, // Transposed
         false // Allocate memory
     );
 
+    #if DEBUG
     if (f) {
         debugArray("d_transposed->row[%d] = %d\n", d_transposed->row, d_transposed->n + 1, true, f);
         debugArray("d_transposed->col[%d] = %d\n", d_transposed->col, d_transposed->nnz, true, f);
+        debugArray("d_transposed->col8[%d] = %ld\n", d_transposed->col8, d_transposed->nnz, true, f);
         debugArray("d_transposed->val[%d] = %lf\n", d_transposed->val, d_transposed->nnz, true, f);
     }
+    #endif
 
     // Release memory
     // ---------------------------------------------------------------------------
@@ -1819,6 +2503,14 @@ CSR* CSRm::Transpose_local(CSR* dlA, FILE* f)
     }
 
     return d_transposed;
+}
+
+bool CSRm::checkSizeAndShift(CSR *A, CSR *AH) {
+    return A->n == AH->n
+        && A->m == AH->m
+        && A->full_n == AH->full_n
+        && A->row_shift == AH->row_shift
+        && A->col_shifted == AH->col_shifted;
 }
 
 /**
@@ -1835,7 +2527,7 @@ CSR* CSRm::Transpose_local(CSR* dlA, FILE* f)
  */
 __global__ void CSRm::countNnzPerRow(itype* row,
     itype row_shift,
-    itype* requestedRowIndexes,
+    gsstype* requestedRowIndexes,
     itype requestedRowIndexesSize,
     itype* ret)
 {
@@ -1870,7 +2562,7 @@ __global__ void CSRm::collectNnzPerRow(
     vtype* val,
     itype row_shift,
     itype n,
-    itype* requestedRowIndexes,
+    gsstype* requestedRowIndexes,
     itype* counter,
     itype* offset,
     matrixItem_t* ret)
@@ -1896,30 +2588,30 @@ void check_and_fix_order(CSR* A)
 {
 
     itype* Arow = A->row;
-    itype* Acol = A->col;
+    gsstype* Acol8 = A->col8;
     vtype* Aval = A->val;
     itype prev;
     int wrongo;
     for (int i = 0; i < A->n; i++) {
         wrongo = 0;
-        prev = A->col[Arow[i]];
+        prev = A->col8[Arow[i]];
         for (int j = Arow[i] + 1; j < Arow[i + 1]; j++) {
-            if (A->col[j] < prev) {
+            if (A->col8[j] < prev) {
                 wrongo = 1;
                 break;
             } else {
-                prev = A->col[j];
+                prev = A->col8[j];
             }
         }
         if (wrongo) {
-            bubbleSort(&Acol[Arow[i]], &Aval[Arow[i]], (Arow[i + 1] - Arow[i]));
+            bubbleSort(&Acol8[Arow[i]], &Aval[Arow[i]], (Arow[i + 1] - Arow[i]));
         }
     }
 }
 
-void swap(itype* xcol, itype* ycol, vtype* xval, vtype* yval)
+void swap(gsstype* xcol, gsstype* ycol, vtype* xval, vtype* yval)
 {
-    itype temp = *xcol;
+    gsstype temp = *xcol;
     vtype tempf = *xval;
     *xcol = *ycol;
     *xval = *yval;
@@ -1927,7 +2619,7 @@ void swap(itype* xcol, itype* ycol, vtype* xval, vtype* yval)
     *yval = tempf;
 }
 
-void bubbleSort(itype arr[], vtype val[], itype n)
+void bubbleSort(gsstype arr[], vtype val[], itype n)
 {
     itype i, j;
     for (i = 0; i < n - 1; i++) {
@@ -1943,7 +2635,6 @@ void bubbleSort(itype arr[], vtype val[], itype n)
 
 CSR* read_matrix_from_file(const char* matrix_path, int m_type, bool loadOnDevice)
 {
-
     CSR* A_host = NULL;
 
     switch (m_type) {
@@ -1954,8 +2645,7 @@ CSR* read_matrix_from_file(const char* matrix_path, int m_type, bool loadOnDevic
         A_host = readMTX2Double(matrix_path);
         break;
     default:
-        std::cout << "You need to specify an input matrix type with the argument -F/--inputype\n";
-        exit(1);
+        DIE("You need to specify an input matrix type with the argument -F/--inputype\n");
     }
 
     assert(A_host != NULL);
@@ -1963,6 +2653,11 @@ CSR* read_matrix_from_file(const char* matrix_path, int m_type, bool loadOnDevic
     if (loadOnDevice) {
         CSR* A = CSRm::copyToDevice(A_host);
         CSRm::free(A_host);
+        if (!A->col8) {
+            A->col8 = CUDA_MALLOC(gsstype, A->nnz);
+        }
+        ASSERT(A->col8);
+        col2col8(A->col, A->col8, A->nnz);
         return A;
     }
 
@@ -1984,7 +2679,7 @@ CSR* readMTXDouble(const char* file_name)
     unsigned long int max_col = 0, is_general = 0, is_symmetric = 0;
     unsigned long int row_shift = 0;
     unsigned long int full_n = 0;
-    unsigned long int col_shifted = 0;
+    long int col_shifted = 0;
 
     int file_base = 1;
 
@@ -1997,27 +2692,37 @@ CSR* readMTXDouble(const char* file_name)
 
     fp = fopen(file_name, "r");
     if (fp == NULL) {
-        fprintf(stdout, "Error opening file %s, errno = %d: %s\n", file_name, errno, strerror(errno));
-        exit(1);
+        DIE("Error opening file %s, errno = %d: %s\n", file_name, errno, strerror(errno));
     }
 
-    fscanf(fp, "%s %s %s %s %s\n", banner, mtx, crd, data_type, storage_scheme);
-    fgets(buffer, BUFSIZE, fp);
-    for (; buffer[0] == '%'; fgets(buffer, BUFSIZE, fp))
+    (void)fscanf(fp, "%s %s %s %s %s\n", banner, mtx, crd, data_type, storage_scheme);
+    (void)fgets(buffer, BUFSIZE, fp);
+    for (; buffer[0] == '%'; (void)fgets(buffer, BUFSIZE, fp))
         ;
 
     int readParams = sscanf(buffer, "%lu %lu %lu "
-                                    "%lu %lu %lu",
+                                    "%lu %lu %ld",
         &num_rows, &num_cols, &fr_nonzeros,
         &row_shift, &full_n, &col_shifted);
-    
-    assert(readParams == 3 || readParams == 6);
+
+    ASSERT(readParams == 3 || readParams == 6);
     if (readParams == 3) {
         row_shift = 0;
         full_n = num_rows;
         col_shifted = 0;
     }
-    
+
+    #if DEBUG
+    if (log_file) {
+        fprintf(log_file,
+            "num_rows = %lu, num_cols = %lu, fr_nonzeros = %lu\n"
+            "row_shift = %lu, full_n = %lu, col_shifted = %ld\n",
+            num_rows, num_cols, fr_nonzeros,
+            row_shift, full_n, col_shifted
+        );
+    }
+    #endif
+
     if (strcmp(data_type, "real") != 0) {
         fprintf(stderr, "Error: we only read real matrices, not '%s'\n", data_type);
         fclose(fp);
@@ -2044,16 +2749,15 @@ CSR* readMTXDouble(const char* file_name)
         for (j = 0; j < fr_nonzeros; j++) {
             if (fgets(buffer, BUFSIZE, fp) != NULL) {
                 sscanf(buffer, "%lu %lu %le", &matrix_cooi[j], &matrix_cooj[j], &matrix_value[j]);
+                // printf("Read %lu %lu %le\n", matrix_cooi[j], matrix_cooj[j], matrix_value[j]);
                 matrix_cooi[j] -= file_base + row_shift;
                 matrix_cooj[j] -= file_base;
                 if (matrix_cooj[j] > max_col) {
                     max_col = matrix_cooj[j];
                 }
             } else {
-                fprintf(stderr, "Reading from MatrixMarket file failed\n");
-                fprintf(stderr, "Error while trying to read record %ld of %lu from file %s\n",
+                DIE("Error while trying to read record %ld of %lu from MatrixMarket file %s\n",
                     j, fr_nonzeros, file_name);
-                exit(-1);
             }
         }
     } else if (is_symmetric) {
@@ -2131,8 +2835,8 @@ CSR* readMTXDouble(const char* file_name)
     }
     matrix_i[0] = 0;
 
-    // assert(num_rows > 0 && num_cols > 0 && num_nonzeros >= 0);
-    CSR* A = CSRm::init(num_rows, num_cols, num_nonzeros, true, false, false, num_rows, row_shift);
+    // ASSERT(num_rows > 0 && num_cols > 0 && num_nonzeros >= 0);
+    CSR* A = CSRm::init(num_rows, num_cols, num_nonzeros, true, false, false, full_n, row_shift);
     FREE(A->val);
     A->val = matrix_data;
 
@@ -2174,22 +2878,20 @@ CSR* readMTX2Double(const char* file_name)
 
     fp = fopen(file_name, "r");
     if (fp == NULL) {
-        fprintf(stdout, "Error opening file %s, errno = %d: %s\n", file_name, errno, strerror(errno));
-        printf("FILE NOT FOUND!\n");
-        exit(1);
+        DIE("Error opening file %s, errno = %d: %s, FILE NOT FOUND!\n", file_name, errno, strerror(errno));
     }
 
-    fscanf(fp, "%d", &num_rows);
-    fscanf(fp, "%d", &num_nonzeros);
+    (void)fscanf(fp, "%d", &num_rows);
+    (void)fscanf(fp, "%d", &num_nonzeros);
 
     matrix_cooi = MALLOC(int, num_nonzeros, true);
     for (j = 0; j < num_nonzeros; j++) {
-        fscanf(fp, "%d", &matrix_cooi[j]);
+        (void)fscanf(fp, "%d", &matrix_cooi[j]);
         matrix_cooi[j] -= file_base;
     }
     matrix_cooj = MALLOC(int, num_nonzeros, true);
     for (j = 0; j < num_nonzeros; j++) {
-        fscanf(fp, "%d", &matrix_cooj[j]);
+        (void)fscanf(fp, "%d", &matrix_cooj[j]);
         matrix_cooj[j] -= file_base;
         if (matrix_cooj[j] > max_col) {
             max_col = matrix_cooj[j];
@@ -2197,7 +2899,7 @@ CSR* readMTX2Double(const char* file_name)
     }
     matrix_value = MALLOC(double, num_nonzeros, true);
     for (j = 0; j < num_nonzeros; j++) {
-        fscanf(fp, "%le", &matrix_value[j]);
+        (void)fscanf(fp, "%le", &matrix_value[j]);
     }
 
     /*----------------------------------------------------------
@@ -2237,7 +2939,7 @@ CSR* readMTX2Double(const char* file_name)
     }
     matrix_i[0] = 0;
 
-    assert(num_rows > 0 && num_rows > 0 && num_nonzeros >= 0);
+    ASSERT(num_rows > 0 && num_rows > 0 && num_nonzeros >= 0);
     CSR* A = CSRm::init(num_rows, num_rows, num_nonzeros, false, false, false, num_rows);
     A->val = matrix_data;
     A->row = matrix_i;
@@ -2307,8 +3009,8 @@ void CSRm::printInfo(CSR* A, FILE* fp)
     fprintf(fp, "shrinked_flag         : %d\n", A->shrinked_flag);
     fprintf(fp, "custom_alloced        : %d\n", A->custom_alloced);
     fprintf(fp, "col_shifted           : %ld\n", A->col_shifted);
-    fprintf(fp, "shrinked_firstrow     : %lu\n", A->shrinked_firstrow);
-    fprintf(fp, "shrinked_lastrow      : %lu\n", A->shrinked_lastrow);
+    // fprintf(fp, "shrinked_firstrow     : %lu\n", A->shrinked_firstrow);
+    // fprintf(fp, "shrinked_lastrow      : %lu\n", A->shrinked_lastrow);
     fprintf(fp, "row_shift             : %lu\n", A->row_shift);
     fprintf(fp, "bitcolsize            : %d\n", A->bitcolsize);
     fprintf(fp, "post_local            : %d\n", A->post_local);
@@ -2371,4 +3073,541 @@ void CSRm::printInfo(CSR* A, FILE* fp)
     }
 
     fprintf(fp, "\n");
+}
+
+void CSRm::fillWithValues(CSR* A, std::initializer_list<vtype> list)
+{
+    _MPI_ENV;
+
+    ASSERT(!A->on_the_device);
+    ASSERT(list.size() == A->full_n * A->m);
+
+    int rowsPerProcess = A->full_n / nprocs;
+    int rowShift = rowsPerProcess * (taskmap ? taskmap[myid] : myid);
+
+    if (A->row_shift) {
+        ASSERT(rowShift == A->row_shift);
+    } else {
+        A->row_shift = rowShift;
+    }
+
+    int firstIndex = rowShift * A->m;
+    int lastIndex = firstIndex + (A->n * A->m) - 1;
+
+    int nnz = 0;
+    int col = 0;
+    int row = 0;
+
+    A->row[0] = 0;
+
+    for (int index = firstIndex; index <= lastIndex; index++) {
+        vtype val = *(list.begin() + index);
+        if (val != 0) {
+            A->val[nnz] = val;
+            A->col[nnz] = col - A->row_shift;
+            A->col8[nnz] = col - A->row_shift;
+            nnz++;
+        }
+        col++;
+        if (col == A->m) {
+            row++;
+            A->row[row] = nnz;
+            col = 0;
+        }
+    }
+
+    if (!A->nnz) {
+        A->nnz = nnz;
+    } else {
+        ASSERT(A->nnz == nnz);
+    }
+
+    A->col_shifted = -A->row_shift;
+}
+
+// void CSRm::debug(CSR *A, FILE *out) {
+//     _MPI_ENV;
+
+//     cudaDeviceSynchronize();
+//     MPI_Barrier(MPI_COMM_WORLD);
+//     for (int i = 0; i < nprocs; i++) {
+//         if (myid == i) {
+//             CSRm::print(A, 3, -1, out, false, false);
+//         }
+//         MPI_Barrier(MPI_COMM_WORLD);
+//     }
+// }
+
+void CSRm::debug(CSR* A, FILE* out)
+{
+    _MPI_ENV;
+
+    cudaDeviceSynchronize();
+
+    CSR* hA = A->on_the_device
+        ? CSRm::copyToHost(A)
+        : A;
+
+    if (nprocs > 1) {
+        CSR* A_glob = join_matrix_mpi(hA);
+        if (ISMASTER) {
+            CSRm::print(A_glob, 3, -1, out, false, false);
+            CSRm::free(A_glob);
+        }
+    } else {
+        CSRm::print(hA, 3, -1, out, false, false);
+    }
+
+    if (A->on_the_device) {
+        CSRm::free(hA);
+    }
+}
+
+CSR* CSRm::createTestMatrix(int col, std::initializer_list<vtype> values)
+{
+    ASSERT(values.size() % col == 0);
+
+    _MPI_ENV;
+
+    int full_n = values.size() / col;
+    int n = full_n / nprocs;
+    int row_shift = n * (taskmap ? taskmap[myid] : myid);
+    if (myid == nprocs - 1) {
+        n += full_n % nprocs;
+    }
+    int max_nnz = n * col;
+
+    CSR* hA = CSRm::init(
+        n, // Rows
+        col, // Cols
+        max_nnz, /* nnz */
+        true, /* allocate_mem */
+        false, /* on_the_device */
+        false, /* symmetric */
+        full_n, /* full_n */
+        row_shift); /* row_shift */
+
+    hA->nnz = 0; // This will force fillWithValues() to set the correct number
+    CSRm::fillWithValues(hA, values);
+
+    CSR* A = CSRm::copyToDevice(hA);
+    CSRm::free(hA);
+    return A;
+}
+
+bool CSRm::eq(CSR* A, CSR* B)
+{
+    // Compare size
+    // ---------------------------------------------------
+    if (A->n != B->n) {
+        TRACE("A->n != B->n");
+        return false;
+    }
+
+    if (A->m != B->m) {
+        TRACE("A->m != B->m");
+        return false;
+    }
+
+    if (A->nnz != B->nnz) {
+        TRACE("A->nnz != B->nnz");
+        return false;
+    }
+
+    if (A->full_n != B->full_n) {
+        TRACE("A->full_n != B->full_n");
+        return false;
+    }
+
+    // Compare row
+    // ---------------------------------------------------
+
+    if (A->on_the_device && B->on_the_device) {
+        if (!deviceMemEq(A->row, B->row, (A->n + 1) * sizeof(itype))) {
+            TRACE("A->row != B->row");
+            return false;
+        }
+    } else if (!A->on_the_device && !B->on_the_device) {
+        if (memcmp(A->row, B->row, (A->n + 1) * sizeof(itype))) {
+            TRACE("A->row != B->row");
+            return false;
+        }
+    } else {
+        itype* Arow = A->on_the_device
+            ? copyArrayToHost(A->row, A->n + 1)
+            : A->row;
+
+        itype* Brow = B->on_the_device
+            ? copyArrayToHost(B->row, B->n + 1)
+            : B->row;
+
+        if (memcmp(Arow, Brow, (A->n + 1) * sizeof(itype))) {
+            TRACE("A->row != B->row");
+            return false;
+        }
+
+        if (A->on_the_device) {
+            FREE(Arow);
+        }
+
+        if (B->on_the_device) {
+            FREE(Brow);
+        }
+    }
+
+    // Compare col
+    // ---------------------------------------------------
+
+    {
+        itype* Acol = A->on_the_device
+            ? copyArrayToHost(A->col, A->nnz)
+            : A->col;
+
+        itype* Bcol = B->on_the_device
+            ? copyArrayToHost(B->col, B->nnz)
+            : B->col;
+
+        for (int i = 0; i < A->nnz; i++) {
+            if (Acol[i] - A->col_shifted != Bcol[i] - B->col_shifted) {
+                TRACE("A->col != B->col");
+                return false;
+            }
+        }
+
+        if (A->on_the_device) {
+            FREE(Acol);
+        }
+
+        if (B->on_the_device) {
+            FREE(Bcol);
+        }
+    }
+
+    // Compare val
+    // ---------------------------------------------------
+
+    if (A->on_the_device && B->on_the_device) {
+        if (!deviceMemEq(A->val, B->val, (A->nnz) * sizeof(vtype))) {
+            TRACE("A->val != B->val");
+            return false;
+        }
+    } else if (!A->on_the_device && !B->on_the_device) {
+        if (memcmp(A->val, B->val, (A->nnz) * sizeof(vtype))) {
+            TRACE("A->val != B->val");
+            return false;
+        }
+    } else {
+        vtype* Aval = A->on_the_device
+            ? copyArrayToHost(A->val, A->nnz)
+            : A->val;
+
+        vtype* Bval = B->on_the_device
+            ? copyArrayToHost(B->val, B->nnz)
+            : B->val;
+
+        bool differ = false;
+        for (size_t i = 0; i < A->nnz; i++) {
+            if (!vtypeEq(Aval[i], Bval[i])) {
+                differ = true;
+                break;
+            }
+        }
+        if (differ) {
+            TRACE("A->val != B->val;");
+            for (int i = 0; i < A->nnz; i++) {
+                if (Aval[i] != Bval[i]) {
+                    TRACE("\nA->val[%d] = %lf\nB->val[%d] = %lf\n", i, Aval[i], i, Bval[i]);
+                }
+            }
+            return false;
+        }
+
+        if (A->on_the_device) {
+            FREE(Aval);
+        }
+
+        if (B->on_the_device) {
+            FREE(Bval);
+        }
+    }
+
+    return true;
+}
+
+CSR* CSRm::product(handles *h, CSR *dA, CSR *dP) {
+    // int row_shift = 0;
+    // // int col_shifted = 0;
+    // if (dA->row_shift) {
+    //     ASSERT(dA->col_shifted == -(long)dA->row_shift);
+    //     // printf("A->row_shift %d, A->col_shifted %d\n", dA->row_shift, dA->col_shifted);
+    //     // printf("P->row_shift %d, P->col_shifted %d\n", dP->row_shift, dP->col_shifted);
+    //     row_shift = dA->row_shift;
+    //     // col_shifted = dA->col_shifted;
+    //     CSRm::shift_cols(dA, row_shift - dP->row_shift);
+    //     dA->row_shift = dP->row_shift;
+    //     dA->col_shifted = -dP->row_shift;
+    // }
+
+    TRACE("first_row = %lu, last_row = %lu", dP->row_shift, dP->row_shift + dP->n - 1);
+
+    vector<gsstype>* _bitcol = get_missing_col(dA, dP);
+    #if DEBUG
+    if (log_file) {
+        debugArray("Columns to request: bitcol[%d] = %d\n", _bitcol->val, _bitcol->n, false, log_file, [dA](const gsstype &c){ return c + dA->row_shift; });
+    }
+    #endif
+
+    TRACE("Before compute_rows_to_rcv_CPU\n");
+    compute_rows_to_rcv_CPU(dA, dP, _bitcol);
+    TRACE("After compute_rows_to_rcv_CPU\n");
+
+    Vector::free(_bitcol);
+
+    if (dP->col_shifted) {
+        CSRm::shift_cols(dP, -dP->col_shifted);
+    }
+
+    TRACE("Before nsparseMGPU_commu_new\n");
+    CSR *dAP = nsparseMGPU_commu_new(h, dA, dP);
+    ASSERT(dAP->col8);
+    col2col8(dAP->col, dAP->col8, dAP->nnz);
+    TRACE("After nsparseMGPU_commu_new\n");
+
+    if (dP->col_shifted) {
+        CSRm::shift_cols(dP, dP->col_shifted);
+    }
+
+    // if (row_shift) {
+    //     CSRm::shift_cols(dA, dP->row_shift - row_shift);
+    //     dA->row_shift = row_shift;
+    //     dA->col_shifted = -row_shift;
+    // }
+
+    ASSERT(dAP->on_the_device);
+    return dAP;
+}
+
+CSR *CSRm::local_product(handles *h, CSR *dA, CSR *dP) {
+    csrlocinfo locinfo;
+    locinfo.fr = 0;
+    locinfo.lr = dP->n;
+    locinfo.row = dP->row;
+#if !defined(CSRSEG)
+    locinfo.col = NULL;
+    // locinfo.col8 = NULL;
+#else
+    locinfo.col = dP->col;
+    locinfo.col8 = dP->col8;
+#endif
+    locinfo.val = dP->val;
+
+    CSR *dAP = nsparseMGPU(dA, dP, &locinfo);
+    return dAP;
+}
+
+bool CSRm::checkProduct(handles *h, CSR *dA, CSR *dP, CSR *dAP) {
+    _MPI_ENV;
+
+    ASSERT(dA->on_the_device);
+    ASSERT(dP->on_the_device);
+    ASSERT(dAP->on_the_device);
+
+    CSR* hA = CSRm::copyToHost(dA);
+    CSR* hP = CSRm::copyToHost(dP);
+
+    // -------------------------------------------------------------------------
+    // Expected result
+    // -------------------------------------------------------------------------
+
+    TRACE("join hA");
+    CSR* hA_glob = nprocs > 1 ? join_matrix_mpi(hA) : hA;
+
+    TRACE("join hP");
+    CSR* hP_glob = nprocs > 1 ? join_matrix_mpi(hP) : hP;
+
+    CSR* dExpectedAP_glob = NULL;
+
+    if (ISMASTER) {
+        // char filename[1024] = {0};
+        // snprintf(filename, 1024, "%s/%s%s%s.mtx", output_dir.c_str(), output_prefix.c_str(), "A", output_suffix.c_str());
+        // CSRm::printMM(hA_glob, filename);
+        // snprintf(filename, 1024, "%s/%s%s%s.mtx", output_dir.c_str(), output_prefix.c_str(), "P", output_suffix.c_str());
+        // CSRm::printMM(hP_glob, filename);
+
+        TRACE("copyToDevice hA_glob");
+        CSR* dA_glob = CSRm::copyToDevice(hA_glob);
+
+        TRACE("copyToDevice hP_glob");
+        CSR* dP_glob = CSRm::copyToDevice(hP_glob);
+
+        // CSRm::forEach(dA_glob, []__device__(CSR *A, int irow, int innz){
+        //     if (irow == 2) {
+        //         int icol = A->col[innz];
+        //         double val = A->val[innz];
+        //         printf("A[%d,%d]=%lf\n", irow, icol, val);
+        //     }
+        // });
+
+        // CSRm::forEach(dP_glob, []__device__(CSR *P, int irow, int innz){
+        //     int icol = P->col[innz];
+        //     if (icol == 2) {
+        //         double val = P->val[innz];
+        //         printf("P[%d,%d]=%lf\n", irow, icol, val);
+        //     }
+        // });
+
+        
+
+        TRACE("Computing expected AP");
+        dExpectedAP_glob = CSRm::local_product(h, dA_glob, dP_glob);
+        ASSERT(dExpectedAP_glob->on_the_device);
+
+        TRACE("Free dA_glob, dP_glob");
+        CSRm::free(dA_glob);
+        CSRm::free(dP_glob);
+    }
+
+    CSRm::free(hA);
+    CSRm::free(hP);
+
+    // -------------------------------------------------------------------------
+    // Compare results
+    // -------------------------------------------------------------------------
+
+    CSR* hAP = CSRm::copyToHost(dAP);
+    CSR* hAP_glob = nprocs > 1 ? join_matrix_mpi(hAP) : hAP;
+    if (hAP_glob != hAP) {
+        CSRm::free(hAP);
+    }
+
+    bool ret = false;
+    if (ISMASTER) {
+        // trace_enabled = true;
+        if (!CSRm::eq(hAP_glob, dExpectedAP_glob)) {
+#if 0
+            fprintf(stderr, "Computed result:\n");
+            CSRm::print(hAP_glob, 3, -1, stderr);
+
+            fprintf(stderr, "Expected result:\n");
+            CSRm::print(dExpectedAP_glob, 3, -1, stderr);
+#endif
+
+            fprintf(stderr, "Ops, it doesn't seem to work properly.\n");
+            char filename[1024] = {0};
+
+            snprintf(filename, 1024, "%s/%s%s%s.mtx", output_dir.c_str(), output_prefix.c_str(), "A", output_suffix.c_str());
+            CSRm::printMM(hA_glob, filename);
+
+            snprintf(filename, 1024, "%s/%s%s%s.mtx", output_dir.c_str(), output_prefix.c_str(), "P", output_suffix.c_str());
+            CSRm::printMM(hP_glob, filename);
+
+            snprintf(filename, 1024, "%s/%s%s%s.mtx", output_dir.c_str(), output_prefix.c_str(), "expected", output_suffix.c_str());
+            CSRm::printMM(dExpectedAP_glob, filename);
+
+            snprintf(filename, 1024, "%s/%s%s%s.mtx", output_dir.c_str(), output_prefix.c_str(), "result", output_suffix.c_str());
+            CSRm::printMM(hAP_glob, filename);
+
+            fprintf(stderr, "Unexpected product. Please, chech .mtx files in %s\n", output_dir.c_str());
+            ret = false;
+        } else {
+            fprintf(stderr, "Wow, it seems to work properly.\n");
+            ret = true;
+        }
+        // trace_enabled = false;
+
+        CSRm::free(hAP_glob);
+        CSRm::free(dExpectedAP_glob);
+
+        if (hA != hA_glob) {
+            CSRm::free(hA_glob);
+        }
+        if (hP != hP_glob) {
+            CSRm::free(hP_glob);
+        }
+    }
+
+    CHECK_MPI(MPI_Bcast(
+        &ret,
+        1, MPI_C_BOOL, 0, MPI_COMM_WORLD
+    ));
+
+    return ret;
+}
+
+bool CSRm::checkUniqueIndeces(CSR *dA) {
+    _MPI_ENV;
+    CSR *hA = CSRm::copyToHost(dA);
+    bool ret = true;
+    for (long i = 0; ret && i < hA->n; i++) {
+        std::unordered_set<long> s;
+        for (int k = hA->row[i]; ret && k < hA->row[i + 1]; k++) {
+            if (!s.insert(hA->col[k]).second) {
+                printf("MPI[%d] Duplicate value at row %ld col %d\n", myid, i, hA->col[k]);
+                ret = false;
+            }
+        }
+    }
+    CSRm::free(hA);
+    return ret;
+}
+
+vector<long> *CSRm::getUniqueColumns(CSR *dA) {
+    ASSERT(dA->on_the_device);
+    long *col8 = cloneDeviceArray(dA->col8, dA->nnz);
+    deviceSort<long, long, NumberComparator<long>>(col8, dA->nnz, NumberComparator<long>());
+    size_t usize = deviceUniqueIP(col8, dA->nnz);
+    vector<long> *ret = Vector::init<long>(usize, false, true);
+    ret->val = col8;
+    return ret;
+}
+
+void CSRm::printUniqueColumns(CSR *dA, const char *matrixName, FILE *out) {
+    vector<long> *ucol8 = CSRm::getUniqueColumns(dA);
+    char fmt[1024] = {};
+    snprintf(fmt, 1024, "%s->col8[%%d]=%%ld\n", matrixName);
+    debugArray(fmt, ucol8->val, ucol8->n, ucol8->on_the_device, out);
+    Vector::free(ucol8);
+}
+
+bool CSRm::checkNonNullColumns(CSR *dA) {
+    ASSERT(dA->on_the_device);
+    _MPI_ENV;
+    vector<long> *ucol8 = CSRm::getUniqueColumns(dA);
+    bool ret = ucol8->n == dA->m;
+    if (!ret) {
+        fprintf(stderr, "myid = %d, %s unique cols %d, m = %d\n", myid, dA->name ? dA->name : "", ucol8->n, dA->m);
+    }
+    Vector::free(ucol8);
+    return ret;
+}
+
+void CSRm::printGlobalMM(CSR *A, FILE *out) {
+    _MPI_ENV;
+
+    cudaDeviceSynchronize();
+
+    CSR* hA = A->on_the_device
+        ? CSRm::copyToHost(A)
+        : A;
+
+    if (nprocs > 1) {
+        CSR* A_glob = join_matrix_mpi(hA);
+        if (ISMASTER) {
+            CSRm::printMM(A_glob, out);
+            CSRm::free(A_glob);
+        }
+    } else {
+        CSRm::printMM(hA, out);
+    }
+
+    if (A->on_the_device) {
+        CSRm::free(hA);
+    }
+}
+
+void CSRm::printGlobalMM(CSR* A, char* name)
+{
+    FILE* fp = fopen(name, "w");
+    printGlobalMM(A, fp);
+    fclose(fp);
 }

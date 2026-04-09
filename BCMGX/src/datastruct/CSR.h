@@ -4,6 +4,7 @@
 #pragma once
 
 #include "utility/globals.h"
+#include "utility/handles.h"
 #include "utility/memory.h"
 #include "utility/mpi.h"
 #include "utility/setting.h"
@@ -17,6 +18,7 @@
 #include "utility/devicePrefixSum.h"
 #include "utility/deviceSort.h"
 #include "utility/deviceUnique.h"
+#include "utility/source_location.hpp"
 
 #include "datastruct/matrixItem.h"
 #include "datastruct/vector.h"
@@ -25,7 +27,7 @@
 
 #include <mpi.h>
 
- /**
+/**
  * @struct halo_info
  * @brief Structure to hold information about halo communication in a distributed matrix.
  */
@@ -96,7 +98,7 @@ struct overlappedList {
  */
 struct overlapped {
     vector<itype>* loc_rows = NULL; ///< Pointer to local rows.
-    itype loc_n = 0; ///< Number of local rows 
+    itype loc_n = 0; ///< Number of local rows
 
     vector<itype>* needy_rows = NULL; ///< Pointer to rows that need to be received.
     itype needy_n = 0; ///< Number of needy rows.
@@ -109,11 +111,13 @@ struct overlapped {
  * @brief Structure representing a custom, distributed, compressed sparse row (CSR) matrix.
  */
 struct CSR {
+    char name[255] = {0};
+
     /**
      * @var nnz
      * @brief Number of non-zero elements in the matrix.
      */
-    stype nnz = 0; 
+    stype nnz = 0;
 
     /**
      * @var n
@@ -181,17 +185,17 @@ struct CSR {
      */
     gsstype col_shifted = 0;
 
-    /**
-     * @var shrinked_firstrow
-     * @brief First row index of the shrunk matrix.
-     */
-    gstype shrinked_firstrow = 0;
+    // /**
+    //  * @var shrinked_firstrow
+    //  * @brief First row index of the shrunk matrix.
+    //  */
+    // gstype shrinked_firstrow = 0;
 
-    /**
-     * @var shrinked_lastrow
-     * @brief Last row index of the shrunk matrix.
-     */
-    gstype shrinked_lastrow = 0;
+    // /**
+    //  * @var shrinked_lastrow
+    //  * @brief Last row index of the shrunk matrix.
+    //  */
+    // gstype shrinked_lastrow = 0;
 
     /**
      * @var val
@@ -206,6 +210,12 @@ struct CSR {
     itype* col = NULL;
 
     /**
+     * @var col8
+     * @brief Pointer to the column indices of the non-zero values - FIX to allow large col.nmbr.
+     */
+    gsstype* col8 = NULL;
+
+    /**
      * @var row
      * @brief Pointer to the row pointers for the CSR matrix.
      */
@@ -213,13 +223,15 @@ struct CSR {
 
     /**
      * @var shrinked_col
-     * @brief Pointer to the column indices of the shrunk matrix.
+     * @brief Pointer to the column indices of the shrunk matrix
      */
     itype* shrinked_col = NULL;
 
-    int* bitcol = NULL; ///< Pointer to bit column data.
+    long* bitcol = NULL; ///< Pointer to bit column data - - FIX to allow large col.nmbr.
     int bitcolsize = 0; ///< Size of the bit column data.
     int post_local = 0; ///< Post-local data.
+
+    int nonuniquesize = 0;
 
     halo_info halo; ///< Halo information for the CSR matrix.
 
@@ -235,13 +247,14 @@ struct matrixItem_t;
  * the indexes of the columns related to non-zero values in the local CSR.
  */
 struct NnzColumnSelector {
-    itype* operator()(matrixItem_t* d_nnzItemsToBeRequested, size_t nnzItemsToBeRequestedSize, size_t* columnsToBeRequestedSize)
+    gsstype* /* itype* */
+    operator()(matrixItem_t * d_nnzItemsToBeRequested, size_t nnzItemsToBeRequestedSize, size_t * columnsToBeRequestedSize)
     {
         *columnsToBeRequestedSize = nnzItemsToBeRequestedSize;
         if (!nnzItemsToBeRequestedSize) {
             return NULL;
         }
-        return deviceMap<matrixItem_t, itype, MatrixItemColumnMapper>(
+        return deviceMap<matrixItem_t, gsstype /*itype*/, MatrixItemColumnMapper>(
             d_nnzItemsToBeRequested,
             nnzItemsToBeRequestedSize,
             MatrixItemColumnMapper());
@@ -260,7 +273,8 @@ struct EveryColumnSelector {
     {
     }
 
-    itype* operator()(matrixItem_t* d_nnzItemsToBeRequested, size_t nnzItemsToBeRequestedSize, size_t* columnsToBeRequestedSize)
+    gsstype* /* itype* */
+    operator()(matrixItem_t * d_nnzItemsToBeRequested, size_t nnzItemsToBeRequestedSize, size_t * columnsToBeRequestedSize)
     {
         *columnsToBeRequestedSize = row_shift;
 
@@ -268,9 +282,11 @@ struct EveryColumnSelector {
             return NULL;
         }
 
-        itype* ret = CUDA_MALLOC(itype, row_shift);
+        gsstype* ret = CUDA_MALLOC(gsstype, row_shift);
+        // itype* ret = CUDA_MALLOC(itype, row_shift);
 
-        deviceForEach(ret, row_shift, FillWithIndexOperator<itype>());
+        deviceForEach(ret, row_shift, FillWithIndexOperator<gsstype>());
+        // deviceForEach(ret, row_shift, FillWithIndexOperator<itype>());
 
         return ret;
     }
@@ -309,6 +325,9 @@ void free(CSR* A);
  */
 void printInfo(CSR* A, FILE* fp = stdout);
 
+void fillWithValues(CSR *A, std::initializer_list<vtype> list);
+void debug(CSR *A, FILE *out);
+
 /**
  * @brief Chooses an appropriate mini-warp size based on the matrix density.
  * @param A Pointer to the CSR matrix.
@@ -329,7 +348,7 @@ void free_rows_to_get(CSR* A);
  * @param limit Limit for printing.
  * @param fp File pointer for output (default is stdout).
  */
-void print(CSR* A, int type, int limit = 0, FILE* fp = stdout);
+void print(CSR* A, int type, int limit = 0, FILE* fp = stdout, bool show_header = true, bool show_footer = true);
 
 /**
  * @brief Prints the CSR matrix in Matrix Market format.
@@ -338,6 +357,23 @@ void print(CSR* A, int type, int limit = 0, FILE* fp = stdout);
  * @param appendMyIdAndNprocs Flag indicating whether to append process ID and number of processes.
  */
 void printMM(CSR* A, char* name, bool appendMyIdAndNprocs = true);
+void printMM(CSR* A, FILE* fp);
+void printMMsimple(CSR* A, char* name, bool appendMyIdAndNprocs = true);
+void printMMsimple(CSR* A, FILE* fp);
+void printMMsc(CSR* A, char* name, bool appendMyIdAndNprocs = true);
+
+CSR *clone(CSR *A);
+
+/**
+ * @brief Returns B = D^-1 A.
+ * @param A Pointer to the CSR matrix.
+ * @param D Pointer to diag(A).
+ */
+ CSR *diagonalScaling(CSR *A, vector<vtype> *D);
+ void diagonalScalingInPlace(CSR *A, vector<vtype> *D);
+
+ vtype localInfinityNorm(CSR *A);
+ vtype globalInfinityNorm(CSR *A);
 
 /**
  * @brief Copies a CSR matrix from host to device.
@@ -378,7 +414,10 @@ CSR* Transpose_local(CSR* dlA, FILE* f);
  * @param shape Shape of the matrix (default is "Q").
  * @return Pointer to the transposed CSR matrix.
  */
-CSR* transpose(CSR* A, FILE* f, const char* shape = "Q");
+CSR* transpose_old(CSR* A, FILE* f, const char* shape = "Q");
+CSR* transpose(CSR* A, FILE* f);
+
+bool checkSizeAndShift(CSR *A, CSR *AH);
 
 /**
  * @brief Computes the absolute row sum of a CSR matrix.
@@ -485,7 +524,11 @@ vector<vtype>* CSRVector_product_adaptive_miniwarp_new(CSR* A, vector<vtype>* lo
  * @param beta Scalar multiplier for the output vector.
  * @return Pointer to the resulting vector.
  */
+#if DEBUG
+vector<vtype>* CSRVector_product_adaptive_miniwarp_witho(CSR* A, vector<vtype>* local_x, vector<vtype>* w, vtype alpha = 1., vtype beta = 0., const nostd::source_location& loc = nostd::source_location::current());
+#else
 vector<vtype>* CSRVector_product_adaptive_miniwarp_witho(CSR* A, vector<vtype>* local_x, vector<vtype>* w, vtype alpha = 1., vtype beta = 0.);
+#endif
 
 /**
  * @brief Performs a matrix-vector product using MPI.
@@ -548,12 +591,12 @@ void checkColumnsOrder(CSR* A);
  */
 void shift_cols(CSR* A, gsstype shift);
 
-/**
- * @brief Shifts the columns of a CSR matrix without using GPU.
- * @param A Pointer to the CSR matrix.
- * @param shift Amount to shift the columns.
- */
-void shift_cols_nogpu(CSR* A, gsstype shift);
+// /**
+//  * @brief Shifts the columns of a CSR matrix without using GPU.
+//  * @param A Pointer to the CSR matrix.
+//  * @param shift Amount to shift the columns.
+//  */
+// void shift_cols_nogpu(CSR* A, gsstype shift);
 
 // kernel
 __global__ void _CSR_vector_mul_mini_indexed_warp(itype n, int MINI_WARP_SIZE, vtype alpha, vtype beta, vtype* A_val, itype* A_row, itype* A_col, vtype* x, vtype* y, itype* to_comp, itype shift, itype op_type);
@@ -585,7 +628,7 @@ __global__ void _CSR_scale_mini_warp(itype n, int MINI_WARP_SIZE, vtype alpha, v
 __global__ void countNnzPerRow(
     itype* row,
     itype row_shift,
-    itype* requestedRowIndexes,
+    gsstype* requestedRowIndexes,
     itype requestedRowIndexesSize,
     itype* ret);
 
@@ -611,7 +654,7 @@ __global__ void collectNnzPerRow(
     vtype* val,
     itype row_shift,
     itype n,
-    itype* requestedRowIndexes,
+    gsstype* requestedRowIndexes,
     itype* counter,
     itype* offset,
     matrixItem_t* ret);
@@ -651,14 +694,18 @@ template <typename MatrixItemSelector, typename ColumnSelector>
 matrixItem_t* requestMissingRows(CSR* dlA, FILE* f, size_t* retSize,
     matrixItem_t** d_nnzItemsRet,
     size_t* rowsToBeRequestedSizeRet,
-    itype** d_rowsToBeRequestedRet,
+    gsstype** d_rowsToBeRequestedRet,
     MatrixItemSelector matrixItemSelector,
     ColumnSelector columnSelector,
     bool useRowShift);
-}
+
+template <typename Op>
+void forEach(CSR *A, Op op);
+
+} // namespace CSRm
 
 void check_and_fix_order(CSR* A);
-void bubbleSort(itype arr[], vtype val[], itype n);
+void bubbleSort(gsstype arr[], vtype val[], itype n);
 
 CSR* read_matrix_from_file(const char* matrix_path, int m_type, bool loadOnDevice = true);
 
@@ -669,6 +716,35 @@ CSR* readMTX2Double(const char* file_name);
 void CSRMatrixPrintMM(CSR* A_, const char* file_name);
 
 // =============================================================================
+
+template <typename Op>
+__global__ void _forEach(CSR A, int warpSize, Op op)
+{
+    int tid = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int irow = tid / warpSize;
+    int lane = tid % warpSize;
+    int rstart, rend;
+
+    if (irow < A.n) {
+        rstart = A.row[irow] + lane;
+        rend = A.row[irow + 1];
+        for (int we = rstart; we < rend; we += warpSize) {
+            op(&A, irow, we);
+        }
+    }
+}
+
+template <typename Op>
+void CSRm::forEach(CSR *A, Op op) {
+    assert(A->on_the_device);
+    
+    int warpSize = CSRm::choose_mini_warp_size(A);
+    GridBlock gb = getKernelParams(A->n * warpSize); // One mini-warp per row
+
+    _forEach<<<gb.g, gb.b>>>(*A, warpSize, op);
+    cudaError_t err = cudaDeviceSynchronize();
+    CHECK_DEVICE(err);
+}
 
 /**
  * @brief Requests missing rows from other MPI processes based on specified criteria.
@@ -689,7 +765,7 @@ template <typename MatrixItemSelector, typename ColumnSelector>
 matrixItem_t* CSRm::requestMissingRows(CSR* dlA, FILE* f, size_t* retSize,
     matrixItem_t** d_nnzItemsRet,
     size_t* rowsToBeRequestedSizeRet,
-    itype** d_rowsToBeRequestedRet,
+    gsstype** d_rowsToBeRequestedRet,
     MatrixItemSelector matrixItemSelector,
     ColumnSelector columnSelector,
     bool useRowShift)
@@ -741,7 +817,7 @@ matrixItem_t* CSRm::requestMissingRows(CSR* dlA, FILE* f, size_t* retSize,
     // Extract column indexes (** REQUESTS **)
     // ---------------------------------------------------------------------------
     size_t columnsToBeRequestedSize = 0;
-    itype* d_columnsToBeRequested = columnSelector(
+    gsstype* d_columnsToBeRequested = columnSelector(
         d_nnzItemsToBeRequested, nnzItemsToBeRequestedSize, &columnsToBeRequestedSize);
 
     // Release memory
@@ -750,16 +826,16 @@ matrixItem_t* CSRm::requestMissingRows(CSR* dlA, FILE* f, size_t* retSize,
 
     // Sort column indexes
     // ---------------------------------------------------------------------------
-    deviceSort<itype, itype, ColumnIndexComparator>(d_columnsToBeRequested, columnsToBeRequestedSize, ColumnIndexComparator());
+    deviceSort<gsstype, gsstype, ColumnIndexComparator>(d_columnsToBeRequested, columnsToBeRequestedSize, ColumnIndexComparator());
 
     if (f) {
-        debugArray("d_columnsToBeRequested[%d] = %d\n", d_columnsToBeRequested, columnsToBeRequestedSize, true, f);
+        debugArray("d_columnsToBeRequested[%d] = %ld\n", d_columnsToBeRequested, columnsToBeRequestedSize, true, f);
     }
 
     // Remove duplicates
     // ---------------------------------------------------------------------------
     size_t columnsToBeRequestedUniqueSize;
-    itype* d_columnsToBeRequestedUnique = deviceUnique<itype>(d_columnsToBeRequested, columnsToBeRequestedSize, &columnsToBeRequestedUniqueSize);
+    gsstype* d_columnsToBeRequestedUnique = deviceUnique<gsstype>(d_columnsToBeRequested, columnsToBeRequestedSize, &columnsToBeRequestedUniqueSize);
 
     if (rowsToBeRequestedSizeRet) {
         *rowsToBeRequestedSizeRet = columnsToBeRequestedUniqueSize;
@@ -775,7 +851,7 @@ matrixItem_t* CSRm::requestMissingRows(CSR* dlA, FILE* f, size_t* retSize,
 
     // Copy unique column indexes to host in order to perform MPI communication
     // ---------------------------------------------------------------------------
-    itype* h_columnsToBeRequestedUnique = copyArrayToHost(d_columnsToBeRequestedUnique, columnsToBeRequestedUniqueSize);
+    gsstype* h_columnsToBeRequestedUnique = copyArrayToHost(d_columnsToBeRequestedUnique, columnsToBeRequestedUniqueSize);
 
     // Release memory
     // ---------------------------------------------------------------------------
@@ -794,8 +870,8 @@ matrixItem_t* CSRm::requestMissingRows(CSR* dlA, FILE* f, size_t* retSize,
     ColumnIndexSender columnIndexSender(&processSelector, f);
     columnIndexSender.setUseRowShift(useRowShift);
 
-    MpiBuffer<itype> sendIndexBuffer;
-    MpiBuffer<itype> rcvIndexBuffer;
+    MpiBuffer<gsstype> sendIndexBuffer;
+    MpiBuffer<gsstype> rcvIndexBuffer;
     columnIndexSender.send(h_columnsToBeRequestedUnique, columnsToBeRequestedUniqueSize,
         &sendIndexBuffer, &rcvIndexBuffer);
 
@@ -805,20 +881,20 @@ matrixItem_t* CSRm::requestMissingRows(CSR* dlA, FILE* f, size_t* retSize,
 
     // Move data to device
     // ---------------------------------------------------------------------------
-    itype* d_requestedRowIndexes = copyArrayToDevice(rcvIndexBuffer.buffer, rcvIndexBuffer.size);
+    gsstype* d_requestedRowIndexes = copyArrayToDevice(rcvIndexBuffer.buffer, rcvIndexBuffer.size);
 
     // Sort row indexes
     // ---------------------------------------------------------------------------
     size_t requestedRowIndexesSize = rcvIndexBuffer.size;
-    deviceSort<itype, itype, ColumnIndexComparator>(d_requestedRowIndexes, requestedRowIndexesSize, ColumnIndexComparator());
+    deviceSort<gsstype, gsstype, ColumnIndexComparator>(d_requestedRowIndexes, requestedRowIndexesSize, ColumnIndexComparator());
 
     // Remove duplicates
     // ---------------------------------------------------------------------------
     size_t requestedRowIndexesUniqueSize;
-    itype* d_requestedRowIndexesUnique = deviceUnique<itype>(d_requestedRowIndexes, requestedRowIndexesSize, &requestedRowIndexesUniqueSize);
+    gsstype* d_requestedRowIndexesUnique = deviceUnique<gsstype>(d_requestedRowIndexes, requestedRowIndexesSize, &requestedRowIndexesUniqueSize);
 
     if (f) {
-        debugArray("d_requestedRowIndexesUnique[%d] = %d\n", d_requestedRowIndexesUnique, requestedRowIndexesUniqueSize, true, f);
+        debugArray("d_requestedRowIndexesUnique[%d] = %ld\n", d_requestedRowIndexesUnique, requestedRowIndexesUniqueSize, true, f);
     }
 
     // Count nnz per row
@@ -897,18 +973,19 @@ matrixItem_t* CSRm::requestMissingRows(CSR* dlA, FILE* f, size_t* retSize,
 
     // Map requested row indexes to actual indexes
     // ---------------------------------------------------------------------------
-    itype* h_requestedRowIndexesUnique = copyArrayToHost(
+    gsstype* h_requestedRowIndexesUnique = copyArrayToHost(
         d_requestedRowIndexesUnique, requestedRowIndexesUniqueSize);
 
-    itype requestedRowIndex2actualIndex[dlA->n];
-    memset(requestedRowIndex2actualIndex, -1, dlA->n * sizeof(int));
+    gsstype requestedRowIndex2actualIndex[dlA->n];
+    // memset(requestedRowIndex2actualIndex, -1, dlA->n * sizeof(int));
+    std::fill(requestedRowIndex2actualIndex, requestedRowIndex2actualIndex + dlA->n, -1L);
     for (int i = 0; i < requestedRowIndexesUniqueSize; i++) {
         requestedRowIndex2actualIndex[h_requestedRowIndexesUnique[i] - dlA->row_shift] = i;
     }
     FREE(h_requestedRowIndexesUnique);
 
     if (f) {
-        debugArray("requestedRowIndex2actualIndex[%d] = %d\n", requestedRowIndex2actualIndex, dlA->n, false, f);
+        debugArray("requestedRowIndex2actualIndex[%d] = %ld\n", requestedRowIndex2actualIndex, dlA->n, false, f);
     }
 
     // Count the number of elements to be sent to other processes
@@ -1076,4 +1153,18 @@ matrixItem_t* CSRm::requestMissingRows(CSR* dlA, FILE* f, size_t* retSize,
     rcvItemsBuffer.buffer = NULL; // Avoid buffer to be free(d)
     *retSize = rcvItemsBuffer.size;
     return ret;
+}
+
+namespace CSRm {
+    CSR* createTestMatrix(int col, std::initializer_list<vtype> values);
+    bool eq(CSR* A, CSR* B);
+    CSR* product(handles *h, CSR *dA, CSR *dP);
+    CSR* local_product(handles *h, CSR *dA, CSR *dP);
+    bool checkProduct(handles *h, CSR *dA, CSR *dP, CSR *dAP);
+    bool checkUniqueIndeces(CSR *dA);
+    vector<long> *getUniqueColumns(CSR *dA);
+    void printUniqueColumns(CSR *dA, const char *matrixName, FILE *out);
+    bool checkNonNullColumns(CSR *dA);
+    void printGlobalMM(CSR *A, FILE *out);
+    void printGlobalMM(CSR* A, char* name);
 }

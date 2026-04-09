@@ -8,7 +8,7 @@
  *
  * This implementation is based on the following references:
  * - Yvan Notay, Artem Napov, "A massively parallel solver for discrete Poisson-like problems",
- *   Journal of Computational Physics, Volume 281, 2015, Pages 237-250. 
+ *   Journal of Computational Physics, Volume 281, 2015, Pages 237-250.
  */
 #pragma once
 
@@ -21,10 +21,10 @@
 
 /**
  * @brief Solves a linear system using the Flexible Conjugate Gradient method (v3).
- * 
+ *
  * This function wraps the flexible conjugate gradient method, calling it and managing
  * the solution process. It stores the solution in `x0` and provides a copy in the return value.
- * 
+ *
  * @param h Handles for CUDA streams and various resources.
  * @param Alocal The matrix representing the linear system (CSR format).
  * @param rhs The right-hand side vector.
@@ -34,4 +34,4 @@
  * @param out Output structure to store results, including convergence history and other statistics.
  * @return vector<vtype>* The solution vector.
  */
-vector<vtype>* solve_fcg(handles* h, CSR* Alocal, vector<vtype>* rhs, vector<vtype>* x0, cgsprec* pr, const params& p, SolverOut* out);
+vector<vtype>* solve_fcg(handles* h, CSR* Alocal, vector<vtype>* rhs, vector<vtype>* x0, Preconditioner* pr, const InputParameters& ip, const CurrentParameters& cp, SolverOut* out);

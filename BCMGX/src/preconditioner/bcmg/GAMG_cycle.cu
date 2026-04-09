@@ -4,7 +4,7 @@
 #include "op/mydiag.h"
 #include "preconditioner/bcmg/GAMG_cycle.h"
 #include "preconditioner/l1jacobi/l1jacobi.h"
-#include "utility/distribuite.h"
+#include "utility/distribute.h"
 #include "utility/globals.h"
 #include "utility/profiling.h"
 #include <stdlib.h>
@@ -59,7 +59,9 @@ void GAMG_cycle(handles* h, int k, bootBuildData* bootamg_data, boot* boot_amg, 
 {
     _MPI_ENV;
 
+    TRACE("Before boot_amg->H_array(%d)", k);
     hierarchy* hrrc = boot_amg->H_array[k];
+    TRACE("After boot_amg->H_array(%d)", k);
 
     if (VERBOSE > 0) {
         std::cout << "P" << myid << ": " << "GAMGCycle: start of level " << l << " Max level " << hrrc->num_levels << "\n";
@@ -71,7 +73,13 @@ void GAMG_cycle(handles* h, int k, bootBuildData* bootamg_data, boot* boot_amg, 
     // Currently, L1-Jacobi is used.
     // -------------------------------------------------------------------------
     // TODO: support multiple solvers
+    #if 0
+    if (ISMASTER) {
+        fprintf(stderr, "l = %d, num_levels = %d\n", l, hrrc->num_levels);
+    }
+    #endif
     if (l == hrrc->num_levels) {
+        TRACE("BEGIN l == hrrc->num_levels");
         if (VERBOSE > 1) {
             vtype tnrm = Vector::norm(h->cublas_h, Xtent->val[l - 1]);
             std::cout << "P" << myid << ": " << "Before coarsest level " << l << " XTent " << tnrm << "\n";
@@ -89,17 +97,21 @@ void GAMG_cycle(handles* h, int k, bootBuildData* bootamg_data, boot* boot_amg, 
             vtype tnrm = Vector::norm(h->cublas_h, Xtent->val[l - 1]);
             std::cout << "P" << myid << ": " << "After coarsest level " << l << " XTent " << tnrm << "\n";
         }
+
+        TRACE("END l == hrrc->num_levels");
     }
     // -------------------------------------------------------------------------
     // l != hrrc->num_levels, means we are at an intermediate level, hence
     // we have to solve the system recursively.
     // -------------------------------------------------------------------------
     else {
-        // fprintf(stdout, "l != hrrc->num_levels\n");
+        TRACE("BEGIN l != hrrc->num_levels");
 
         // ---------------------------------------------------------------------
         // PRE-SMOOTHING (begin)
         // ---------------------------------------------------------------------
+
+        TRACE("BEGIN presmoothing");
 
         if (VERBOSE > 1) {
             vtype tnrm = Vector::norm(h->cublas_h, Rhs->val[l - 1]);
@@ -140,6 +152,8 @@ void GAMG_cycle(handles* h, int k, bootBuildData* bootamg_data, boot* boot_amg, 
             fprintf(stdout, "P%d: After pre smoothing at level %d Rhs %lf\n", myid, l, tnrm);
         }
 
+        TRACE("END presmoothing");
+
         // ---------------------------------------------------------------------
         // PRE-SMOOTHING (end)
         // ---------------------------------------------------------------------
@@ -150,11 +164,15 @@ void GAMG_cycle(handles* h, int k, bootBuildData* bootamg_data, boot* boot_amg, 
         GAMGcycle::setBufferSize(Rhs->val[l - 1]->n);
         vector<vtype>* Res = GAMGcycle::Res_buffer;
 
+        TRACE("BEGIN 1");
+
         // BEGIN_DETAILED_TIMING(PREC_APPLY, VECTOR_COPY);
         Vector::copyTo(Res, Rhs->val[l - 1], (nprocs > 1) ? *(hrrc->A_array[l - 1]->os.streams->comm_stream) : 0);
         // END_DETAILED_TIMING(PREC_APPLY, VECTOR_COPY);
 
         CSRm::CSRVector_product_adaptive_miniwarp_witho(hrrc->A_array[l - 1], Xtent->val[l - 1], Res, -1., 1.);
+
+        TRACE("END 1");
 
         if (VERBOSE > 1) {
             vtype tnrm = Vector::norm_MPI(h->cublas_h, Res);
@@ -162,20 +180,36 @@ void GAMG_cycle(handles* h, int k, bootBuildData* bootamg_data, boot* boot_amg, 
             fprintf(stdout, "P%d: Residual at level %d: %lf\n", myid, l, tnrm);
         }
 
+        TRACE("BEGIN 2");
+
         if (nprocs == 1) {
             CSRm::CSRVector_product_adaptive_miniwarp_witho(hrrc->R_array[l - 1], Res, Rhs->val[l], 1., 0.);
         } else {
 
-            CSR* R_local = hrrc->R_local_array[l - 1];
+            TRACE("BEGIN 2.1 l = %d", l);
+            assert(hrrc);
+            // assert(hrrc->R_local_array);
+            // assert(hrrc->P_local_array[l - 1]);
+            // assert(hrrc->R_local_array[l - 1]);
+            // CSR* R_local = hrrc->R_local_array[l - 1];
+            CSR* R_local = hrrc->R_array[l - 1];
+
             assert(hrrc->A_array[l - 1]->full_n == R_local->m);
             vector<vtype>* Res_full = Xtent_2->val[l - 1];
+            TRACE("END 2.1 l = %d", l);
 
             // BEGIN_DETAILED_TIMING(PREC_APPLY, CUDAMEMCOPY);
             cudaMemcpy(Res_full->val, Res->val, hrrc->A_array[l - 1]->n * sizeof(vtype), cudaMemcpyDeviceToDevice);
             // END_DETAILED_TIMING(PREC_APPLY, CUDAMEMCOPY);
 
+            TRACE("BEGIN 2.2");
+            // CHECK_DEVICE(cudaDeviceSynchronize());
             CSRm::CSRVector_product_adaptive_miniwarp_witho(R_local, Res_full, Rhs->val[l], 1., 0.);
+            // CHECK_DEVICE(cudaDeviceSynchronize());
+            TRACE("END 2.2");
         }
+
+        TRACE("END 2");
 
         Vector::fillWithValue(Xtent->val[l], 0.);
 
@@ -190,17 +224,24 @@ void GAMG_cycle(handles* h, int k, bootBuildData* bootamg_data, boot* boot_amg, 
             }
         }
 
+        TRACE("BEGIN 3");
+
         // BEGIN_DETAILED_TIMING_NODEC(PREC_APPLY, RESTGAMG);
         if (nprocs == 1) {
             CSRm::CSRVector_product_adaptive_miniwarp(hrrc->P_array[l - 1], Xtent->val[l], Xtent->val[l - 1], 1., 1.);
         } else {
-            CSRm::CSRVector_product_adaptive_miniwarp_witho(hrrc->P_local_array[l - 1], Xtent->val[l], Xtent->val[l - 1], 1., 1.);
+            // CSRm::CSRVector_product_adaptive_miniwarp_witho(hrrc->P_local_array[l - 1], Xtent->val[l], Xtent->val[l - 1], 1., 1.);
+            CSRm::CSRVector_product_adaptive_miniwarp_witho(hrrc->P_array[l - 1], Xtent->val[l], Xtent->val[l - 1], 1., 1.);
         }
         // END_DETAILED_TIMING(PREC_APPLY, RESTGAMG);
+
+        TRACE("END 3");
 
         // ---------------------------------------------------------------------
         // POST-SMOOTHING (begin)
         // ---------------------------------------------------------------------
+
+        TRACE("BEGIN postsmoothing");
 
         if (VERBOSE > 1) {
             vtype tnrm = Vector::norm(h->cublas_h, Xtent->val[l - 1]);
@@ -224,9 +265,13 @@ void GAMG_cycle(handles* h, int k, bootBuildData* bootamg_data, boot* boot_amg, 
             std::cout << "P" << myid << ": " << "After post smoothing at level " << l << " XTent " << tnrm << "\n";
         }
 
+        TRACE("END postsmoothing");
+
         // ---------------------------------------------------------------------
         // POST-SMOOTHING (end)
         // ---------------------------------------------------------------------
+
+        TRACE("END l != hrrc->num_levels");
     }
 
     if (VERBOSE > 0) {

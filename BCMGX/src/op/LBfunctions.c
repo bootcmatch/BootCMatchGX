@@ -1,3 +1,5 @@
+//#include "LBfunctions.h"
+
 #ifdef SW_USE_LIB
 
 #include <stdio.h>
@@ -20,6 +22,7 @@
  * @param id An identifier for the operation (not used in this implementation).
  * @return int Returns an integer status code (0 for success, non-zero for failure).
  */
+
 int LBsolve(double *W, double *alpha, int s, int id) {
 
 	int info;
@@ -42,6 +45,7 @@ int LBsolve(double *W, double *alpha, int s, int id) {
  * @param s The size of the matrix (s x s).
  * @return int Returns an integer status code (0 for success, non-zero for failure).
  */
+
 int LBsolvem(double *W, double *beta, int s) {
 
 	int info;
@@ -63,9 +67,54 @@ int LBsolvem(double *W, double *beta, int s) {
  * @param b1 Pointer to the first matrix involved in the multiplication.
  * @param s The size of the matrices (s x s).
  */
+
 void LBdgemm(double *W, double *beta, double *b1, int s) {
 	//W=W-b1*beta
 	cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, s, s, s, -1.0, b1, s, beta, s, 1.0, W, s);
 }
+
+
+/**
+ * @brief Performs LU decomposition.
+ *
+ * This function performs LU factorization of a general matrix
+ *
+ * @param W Pointer to the LU decomposed matrix in column-major order.
+ * @param s The size of the matrix (s x s).
+ * @param ipiv pivot indices returned by LU decomposition.
+ * @return int Returns an integer status code (0 for success, non-zero for failure).
+ */
+
+int my_dgetrf(double *W, int s, int* ipiv) {
+
+	int info;
+	info=LAPACKE_dgetrf(LAPACK_COL_MAJOR,s,s,W,s,ipiv);//info=0: ok, info<0: illegal param
+	if (info != 0) printf("dgetrf: %d\n",info);
+	return info;
+}
+
+/**
+ * @brief Solves a linear system using LU decomposition for multiple right-hand sides.
+ *
+ * This function given the LU factorization of a general matrix
+ * solves the linear system \( W \cdot X = \beta \) for \( X \), where \( X \)
+ * contains multiple right-hand sides.
+ *
+ * @param W Pointer to the LU decomposed matrix in column-major order.
+ * @param rhs Pointer to the right-hand side matrix (multiple vectors).
+ * @param s The size of the matrix (s x s).
+ * @param nrhs number of right-hand side vectors.
+ * @param ipiv pivot indices returned by LU decomposition.
+ * @return int Returns an integer status code (0 for success, non-zero for failure).
+ */
+
+int my_dgetrs(double *W, double *rhs, int s, int nrhs, int* ipiv) {
+
+	int info;
+	info=LAPACKE_dgetrs(LAPACK_COL_MAJOR,'N',s,nrhs,W,s,ipiv,rhs,s);//info=0: ok, info<0: illegal param.
+	if (info != 0) printf("dgetrs (nrhs %d): %d\n",nrhs,info);
+	return info;
+}
+
 
 #endif

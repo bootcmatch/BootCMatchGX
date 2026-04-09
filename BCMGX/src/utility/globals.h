@@ -18,8 +18,11 @@ extern std::string output_dir;
 extern std::string output_prefix;
 extern std::string output_suffix;
 
+int get_mapped_task(int i);
+
 void close_log_file();
 void open_log_file(int myid, const char* log_filename);
+void create_pid_file(int myid);
 
 #if 1
 #define TRACE_REACHED_LINE()                                           \
@@ -34,6 +37,6 @@ void open_log_file(int myid, const char* log_filename);
 #endif
 
 namespace BCM {
-void init(int argc, char** argv);
+void init(int* argc, char*** argv, const char* log_file_name = NULL);
 void shutdown();
 };

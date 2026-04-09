@@ -20,8 +20,7 @@ double norm(handles* h, vector<double>* v)
 int main(int argc, char** argv)
 {
     if (argc < 3 || argc > 4) {
-        printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        DIE(USAGE, argv[0]);
     }
 
     handles* h = Handles::init();
@@ -35,8 +34,7 @@ int main(int argc, char** argv)
     // Compute norm(sol1)
     double denominator = norm(h, sol1);
     if (denominator == 0.) {
-        printf("sol1 must be != <0>\n");
-        exit(1);
+        DIE("sol1 must be != <0>\n");
     }
 
     // Compute sol1 - sol2 and put the result into sol1
@@ -57,8 +55,7 @@ int main(int argc, char** argv)
     if (argc > 3) {
         double threshold = atof(argv[3]);
         if (result > threshold) {
-            printf("Relative error exceeds threshold (%lg)\n", threshold);
-            exit(1);
+            DIE("Relative error exceeds threshold (%lg)\n", threshold);
         }
     }
 

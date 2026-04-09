@@ -134,14 +134,12 @@ int main(int argc, char** argv)
             break;
         case 'h':
         default:
-            printf(USAGE, argv[0]);
-            exit(EXIT_FAILURE);
+            DIE(USAGE, argv[0]);
         }
     }
 
     if (out_file == NULL) {
-        printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        DIE(USAGE, argv[0]);
     }
 
     CSR* A = NULL;
@@ -150,8 +148,7 @@ int main(int argc, char** argv)
         ? fillSparseMatrix(&A, N)
         : fillDenseMatrix(&A, N);
     if (err != BCM_SUCCESS) {
-        printf("Error allocating test matrix\n");
-        exit(EXIT_FAILURE);
+        DIE("Error allocating test matrix\n");
     }
     printf("Done\n");
 

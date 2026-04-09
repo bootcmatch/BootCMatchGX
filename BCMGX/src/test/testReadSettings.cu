@@ -26,8 +26,7 @@ int main(int argc, char** argv)
             settings_file = optarg;
             break;
         default:
-            printf(USAGE, argv[0]);
-            exit(EXIT_FAILURE);
+            DIE(USAGE, argv[0]);
         }
     }
 
@@ -35,11 +34,10 @@ int main(int argc, char** argv)
     StartMpi(&myid, &nprocs, &argc, &argv);
 
     if (settings_file.empty()) {
-        printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        DIE(USAGE, argv[0]);
     }
 
-    params p = ends_with(settings_file, ".properties")
+    InputParameters p = ends_with(settings_file, ".properties")
         ? Params::initFromPropertiesFile(settings_file.c_str())
         : Params::initFromFile(settings_file.c_str());
     if (p.error != 0) {

@@ -15,6 +15,7 @@
 #include "utility/precision.h"
 #include "utility/profiling.h"
 #include "utility/setting.h"
+#include "utility/col8.h"
 
 #include <cub/cub.cuh>
 #include <cub/device/device_select.cuh>
@@ -79,6 +80,24 @@ void shift_array(itype n, itype* v, gsstype shift)
 {
     GridBlock gb = gb1d(n, BLOCKSIZE);
     _shift_array<<<gb.g, gb.b>>>(n, v, shift);
+}
+
+__global__ void _shift_array8(itype n, gsstype* v, gsstype shift)
+{
+    itype i = blockDim.x * blockIdx.x + threadIdx.x;
+
+    if (i >= n) {
+        return;
+    }
+    gsstype scratch = v[i];
+    scratch += shift;
+    v[i] = scratch;
+}
+
+void shift_array8(itype n, gsstype* v, gsstype shift)
+{
+    GridBlock gb = gb1d(n, BLOCKSIZE);
+    _shift_array8<<<gb.g, gb.b>>>(n, v, shift);
 }
 
 struct RowIndexShifter {
@@ -284,7 +303,18 @@ __global__ void d_kapGrad_merge(int nrows, int lastrow, int rowsinpa, int orow, 
     REALafsai* coef, REALafsai* rhs, int* IWN, int* WI, REALafsai* WR,
     int* done);
 
-void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
+// #define NTHREADSF2D 1024
+// extern __global__ void coli2l(long* t, int* s, int n);
+
+// #define COPYCOL(M, N)                                                       \
+//     {                                                                       \
+//         int nblocksf2d;                                                     \
+//         (M)->col8 = CUDA_MALLOC(gsstype, (M)->nnz, false);                  \
+//         nblocksf2d = ((M)->nnz + NTHREADSF2D - 1) / NTHREADSF2D;            \
+//         coli2l<<<nblocksf2d, NTHREADSF2D>>>((M)->col8, (M)->col, (M)->nnz); \
+//     }
+
+void afsai_setup(handles* h, CSR* Alocal, Preconditioner* pr, const InputParameters& p)
 {
     bool concatenated_has_been_allocated = false;
     int GPUDevId = 0, i;
@@ -309,9 +339,8 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
     }
 
     if (nthreads < 1 || nthreads > MAXNTHREADS) {
-        fprintf(stderr, "Invalid number of threads %d, must be > 0 and < %d\n",
+        DIE("Invalid number of threads %d, must be > 0 and < %d\n",
             nthreads, MAXNTHREADS);
-        exit(1);
     }
 
     nrows = Alocal->n;
@@ -323,9 +352,8 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
     int* d_ind = CUDA_MALLOC(int, nrows);
     nblocks = (nrows * WARPSIZE + nthreads - 1) / nthreads;
     if (nblocks < 1 || nblocks > MAXNBLOCKS) {
-        fprintf(stderr, "Invalid number of blocks $d, must be > 0 and < %ld\n",
+        DIE("Invalid number of blocks $d, must be > 0 and < %ld\n",
             MAXNBLOCKS);
-        exit(1);
     }
 
     finddiag<<<nblocks, nthreads>>>(Alocal->row, Alocal->col, d_ind, nrows, Alocal->row_shift);
@@ -349,10 +377,11 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
 
     itype* d_concatenatedRow;
     itype* d_concatenatedCol;
+    gsstype* d_concatenatedCol8;
     vtype* d_concatenatedVal;
     int offsetstartrow = 0;
     int offcol = 0;
-    itype* d_rowsToBeRequestedRet = NULL;
+    gsstype* d_rowsToBeRequestedRet = NULL;
     if (nprocs == 1) {
 
         if (sizeof(REALafsai) == sizeof(double)) {
@@ -372,6 +401,7 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
         CSR* AtempXexc = CSRm::init(Alocal->n, Alocal->m, Alocal->nnz, false, true, false, Alocal->full_n, Alocal->row_shift);
         AtempXexc->row = Alocal->row;
         AtempXexc->col = Alocal->col;
+        AtempXexc->col8 = Alocal->col8;
         AtempXexc->val = d_coef_ADouble;
 
         MatrixItemColumnIndexLessThanSelector matrixItemSelector(
@@ -395,7 +425,6 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
             USECOLSHIFT);
 
         // ---------------------------------------------------------------------------
-
         matrixItem_t* d_missingItems = copyArrayToDevice(h_missingItems, missingItemsSize);
         FREE(h_missingItems);
 
@@ -405,12 +434,14 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
 
         d_concatenatedRow = AtempXexc->row;
         d_concatenatedCol = AtempXexc->col;
+        d_concatenatedCol8 = AtempXexc->col8;
         d_concatenatedVal = AtempXexc->val;
         itype concatenatedNnz = AtempXexc->nnz;
         itype concatenatedN = AtempXexc->n;
         itype missingItemsN = AtempXexc->row_shift;
         itype* d_missingItemsRow = NULL;
         itype* d_missingItemsCol = NULL;
+        gsstype* d_missingItemsCol8 = NULL;
         vtype* d_missingItemsVal = NULL;
 
         size_t missingItemsRowUniqueSize;
@@ -424,6 +455,7 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
                 0, // row_shift
                 &d_missingItemsRow,
                 &d_missingItemsCol,
+                &d_missingItemsCol8,
                 &d_missingItemsVal,
                 false, // Transposed,
                 true // Allocate memory
@@ -432,6 +464,7 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
             if (log_file) {
                 debugArray("d_missingItemsRow[%d] = %d\n", d_missingItemsRow, missingItemsN + 1, true, log_file);
                 debugArray("d_missingItemsCol[%d] = %d\n", d_missingItemsCol, missingItemsSize, true, log_file);
+                debugArray("d_missingItemsCol8[%d] = %ld\n", d_missingItemsCol8, missingItemsSize, true, log_file);
                 debugArray("d_missingItemsVal[%d] = %lf\n", d_missingItemsVal, missingItemsSize, true, log_file);
             }
 
@@ -487,6 +520,16 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
                 true // Returned array: onDevice
             );
 
+            d_concatenatedCol8 = concatArrays(
+                d_missingItemsCol8, // First array
+                missingItemsSize, // First array: len
+                true, // First array: onDevice
+                AtempXexc->col8, // Second array
+                AtempXexc->nnz, // Second array: len
+                true, // Second array: onDevice
+                true // Returned array: onDevice
+            );
+
             d_concatenatedVal = concatArrays(
                 d_missingItemsVal, // First array
                 missingItemsSize, // First array: len
@@ -501,12 +544,14 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
             if (log_file) {
                 debugArray("d_concatenatedRow[%d] = %d\n", d_concatenatedRow, concatenatedN + 1, true, log_file);
                 debugArray("d_concatenatedCol[%d] = %d\n", d_concatenatedCol, concatenatedNnz, true, log_file);
+                debugArray("d_concatenatedCol8[%d] = %d\n", d_concatenatedCol8, concatenatedNnz, true, log_file);
                 debugArray("d_concatenatedVal[%d] = %lf\n", d_concatenatedVal, concatenatedNnz, true, log_file);
             }
 
             CUDA_FREE(d_missingItemsRowUnique);
             CUDA_FREE(d_missingItemsRow);
             CUDA_FREE(d_missingItemsCol);
+            CUDA_FREE(d_missingItemsCol8);
             CUDA_FREE(d_missingItemsVal);
         }
 
@@ -523,11 +568,14 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
             printf("[Process %d] Shift col of %lu positions\n", myid, (Alocal->row_shift - offsetstartrow));
 #if USECOLSHIFT
             shift_array(nterms, d_concatenatedCol, offsetstartrow);
+            shift_array8(nterms, d_concatenatedCol8, offsetstartrow);
 #else
             shift_array(nterms, d_concatenatedCol, -(Alocal->row_shift - offsetstartrow));
+            shift_array8(nterms, d_concatenatedCol8, -(Alocal->row_shift - offsetstartrow));
 #endif
             if (log_file) {
                 debugArray("*** d_concatenatedCol[%d] = %d\n", d_concatenatedCol, nterms, true, log_file);
+                debugArray("*** d_concatenatedCol8[%d] = %d\n", d_concatenatedCol8, nterms, true, log_file);
             }
         }
     }
@@ -633,9 +681,8 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
             printf("GPU %d: numero di righe del precondizionatore calcolate in parallelo per kapGrad=%d\n", i, rowsinpa);
         }
         if (rowsinpa < 1) {
-            fprintf(stderr, "Invalid number of rows in parallel %d, must be > 0\n",
+            DIE("Invalid number of rows in parallel %d, must be > 0\n",
                 rowsinpa);
-            exit(1);
         }
         rowsinpa = MIN(rowsinpa, nrows);
         if (getenv(DROWSINPA)) {
@@ -648,9 +695,8 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
                 drowsinpa);
         }
         if (drowsinpa < 1) {
-            fprintf(stderr, "Invalid number of rows in parallel %d, must be > 0\n",
+            DIE("Invalid number of rows in parallel %d, must be > 0\n",
                 drowsinpa);
-            exit(1);
         }
         d_full_A[i] = CUDA_MALLOC(REALafsai, drowsinpa * (mmax * (mmax + 1) / 2), true);
         d_rhscratch[i] = CUDA_MALLOC(REALafsai, drowsinpa * mmax, true);
@@ -658,9 +704,8 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
 
         MY_CUDA_CHECK(cudaMemGetInfo(&freeMem, &totMem));
         if ((freeMem / mmax) < avelen) {
-            fprintf(stderr, "Not enough memory for IWN: required %d, available %zu\n",
+            DIE("Not enough memory for IWN: required %d, available %zu\n",
                 wkrsppt, freeMem);
-            exit(1);
         }
 
         d_WI[i] = CUDA_MALLOC(int, 2 * rowsinpa * wkrsppt, true);
@@ -709,26 +754,26 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
                     d_coef_A[i], d_srhs[i], d_IWN[i], d_WI[i], d_WR[i], d_done[i]);
                 cudaError_t err = cudaPeekAtLastError();
                 if (cudaSuccess != err) {
-                    fprintf(stderr, "Cuda error: in file '%s' in line %i : %s, nthreads=%d, nblocks=%d\n",
+                    DIE("Cuda error: in file '%s' in line %i : %s, nthreads=%d, nblocks=%d\n",
                         __FILE__, __LINE__, cudaGetErrorString(err), nthreads, nblocks);
-                    exit(EXIT_FAILURE);
                 }
             }
         }
         for (i = 0; i < ngpu; i++) {
             startrow = offsetstartrow;
             lastrow = nrowsxgpu + startrow;
-            rowschnk = nrowsxgpu;
-            for (irow = startrow; irow < lastrow; irow += MIN(drowsinpa, rowschnk)) {
-                nblocks = ((MIN(drowsinpa, rowschnk)) + nthreads - 1) / nthreads;
-                d_gatherFullSysAdapt<<<nblocks, nthreads>>>(lastrow, MIN(drowsinpa, rowschnk), irow, mmax, wkrsppt, d_mrow_A[i], d_mrow_old_A[i], d_iat_A[i], d_ja_A[i], d_IWN[i], d_coef_A[i], d_full_A[i], d_rhscratch[i], d_done[i]);
-                nblocks = ((MIN(drowsinpa, rowschnk) * (istep + lfil)) + nthreads - 1) / nthreads;
+            rowschnk = MIN(nrowsxgpu, drowsinpa);
+            for (irow = startrow; irow < lastrow; irow += rowschnk) {
+                int lrows = MIN((lastrow - irow), rowschnk);
+                nblocks = ((lrows) + nthreads - 1) / nthreads;
+                d_gatherFullSysAdapt<<<nblocks, nthreads>>>(lastrow, lrows, irow, mmax, wkrsppt, d_mrow_A[i], d_mrow_old_A[i], d_iat_A[i], d_ja_A[i], d_IWN[i], d_coef_A[i], d_full_A[i], d_rhscratch[i], d_done[i]);
+                nblocks = ((lrows * (istep + lfil)) + nthreads - 1) / nthreads;
                 expandRHS<<<nblocks, nthreads>>>(d_srhs[i], d_rhscratch[i],
-                    rowschnk, MIN(drowsinpa, rowschnk), irow - startrow, istep + lfil, d_done[i] + irow);
-                choldc(MIN(drowsinpa, rowschnk), d_mrow_A[i], d_full_A[i], d_rhscratch[i],
+                    rowschnk, lrows, irow - startrow, istep + lfil, d_done[i] + irow);
+                choldc(lrows, d_mrow_A[i], d_full_A[i], d_rhscratch[i],
                     d_done[i], irow);
                 expandRHS<<<nblocks, nthreads>>>(d_rhs[i], d_rhscratch[i],
-                    rowschnk, MIN(drowsinpa, rowschnk), irow - startrow, istep + lfil, d_done[i] + irow);
+                    rowschnk, lrows, irow - startrow, istep + lfil, d_done[i] + irow);
             }
         }
         for (i = 0; i < ngpu; i++) {
@@ -865,9 +910,8 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
 
     nblocks = (nrows * WARPSIZE + nthreads - 1) / nthreads;
     if (nblocks < 1 || nblocks > MAXNBLOCKS) {
-        fprintf(stderr, "Invalid number of blocks $d, must be > 0 and < %ld\n",
+        DIE("Invalid number of blocks $d, must be > 0 and < %ld\n",
             MAXNBLOCKS);
-        exit(1);
     }
 #if defined(DEBUGMGPU)
     {
@@ -999,12 +1043,14 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
     CSR* APrec = CSRm::init(Alocal->n, Alocal->m, ind_G, false, true, false, Alocal->full_n, Alocal->row_shift);
     APrec->row = d_iat_Prec;
     APrec->col = d_ja_Prec;
+    COPYCOL(APrec, "")
     APrec->val = d_coef_PrecDouble;
 
     // CSRm::printMM(APrec,"Precondizionatore");
 
     CSRm::shift_cols(APrec, -APrec->row_shift);
     APrec->col_shifted = -APrec->row_shift;
+    
     halo_info haloPrec = haloSetup(APrec, NULL);
     APrec->halo = haloPrec;
     shrink_col(APrec, NULL);
@@ -1013,12 +1059,14 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
         printf("Computing APrecT\n");
     }
     CSR* APrecT = CSRm::transpose(APrec, log_file);
+    // COPYCOL(APrecT, "")
+
     if (ISMASTER) {
         printf("APrecT computed\n");
     }
 
     // CSRm::printMM(APrec,"Precondizionatore");
-
+    
     halo_info haloPrecT = haloSetup(APrecT, NULL);
     APrecT->halo = haloPrecT;
     shrink_col(APrecT, NULL);
@@ -1035,8 +1083,7 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
     snprintf(name, sizeof(name), "prec_j_coef_%d", getpid());
     fpprec = fopen(name, "w");
     if (fpprec == NULL) {
-        fprintf(stderr, "Could not create %s\n", name);
-        exit(1);
+        DIE("Could not create %s\n", name);
     }
     for (i = 0; i < ind_G; i++) {
         if (i == ia_G[crow + 1]) {
@@ -1055,8 +1102,7 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
     crow = 0;
     fpprec = fopen(name, "w");
     if (fpprec == NULL) {
-        fprintf(stderr, "Could not create %s\n", name);
-        exit(1);
+        DIE("Could not create %s\n", name);
     }
     jcol = 0;
     for (i = 0; i < nrows; i++) {
@@ -1089,7 +1135,7 @@ void afsai_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
     }
 }
 
-void afsai_apply(handles* h, CSR* Alocal, vector<double>* v_d_r, vector<double>* v_d_pr, cgsprec* pr, const params& p, PrecOut* out)
+void afsai_apply(handles* h, CSR* Alocal, vector<double>* v_d_r, vector<double>* v_d_pr, Preconditioner* pr, const InputParameters& ip)
 {
     AfsaiData* afsaiP = &pr->afsai;
     static int first = 1;
@@ -1102,7 +1148,7 @@ void afsai_apply(handles* h, CSR* Alocal, vector<double>* v_d_r, vector<double>*
     CSRm::CSRVector_product_adaptive_miniwarp_witho(afsaiP->AprecT, afsaiP->v_d_dummy, v_d_pr, 1., 0.);
 }
 
-void afsai_finalize(CSR* Alocal, cgsprec* pr, const params& p)
+void afsai_finalize(CSR* Alocal, Preconditioner* pr, const InputParameters& p)
 {
     CSRm::free(pr->afsai.Aprec);
     CSRm::free(pr->afsai.AprecT);

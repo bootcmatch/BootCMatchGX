@@ -6,11 +6,17 @@
 #include "utility/memory.h"
 #include "utility/setting.h"
 #include "utility/utils.h"
+#include "utility/arrays.h"
+#include "utility/devicePartition.h"
+#include "utility/deviceMemEq.h"
 
 #include <stdlib.h>
 #include <thrust/copy.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sequence.h>
+#include <thrust/device_vector.h>
+#include <thrust/remove.h>
+#include <thrust/functional.h> 
 
 using namespace std;
 
@@ -24,11 +30,28 @@ struct int_predicate {
     }
 };
 
+struct long_predicate {
+    __host__ __device__ bool operator()(const long x, const long f, const long l)
+    {
+        return ((x < f) || (x > l));
+    }
+};
+
 /**
  * @brief Predicate to check if two integers are equal.
  */
 struct int_equal_to {
     __host__ __device__ bool operator()(int a, int b)
+    {
+        return a == b;
+    }
+};
+
+/**
+ * @brief Predicate to check if two integers are equal.
+ */
+struct long_equal_to {
+    __host__ __device__ bool operator()(long a, long b)
     {
         return a == b;
     }
@@ -51,47 +74,34 @@ struct int_equal_to {
  * @param num_thr The number of threads to use for the operation.
  * @return int* Pointer to the host array containing the unique values.
  */
-int* getmct(int* Col, int nnz, int f, int l, int* uvs, int** bitcol, int* bitcolsize, int num_thr)
+long* getmct(gsstype* Col, int nnz, int f, int l, int* uvs, long** bitcol, int* bitcolsize, int* nonuniquesize, int num_thr)
 {
-    int *d_output, d_size;
+    long *d_out = NULL;
+    size_t d_out_size = 0;
+
     if ((*bitcol) != NULL) {
-        d_output = *bitcol;
-        d_size = bitcolsize[0];
+        d_out      = *bitcol;
+        d_out_size = bitcolsize[0];
     } else {
-        if (nnz > sizeof_buffer_4_getmct) {
-            if (sizeof_buffer_4_getmct > 0) {
-                CUDA_FREE(buffer_4_getmct);
-            }
-            sizeof_buffer_4_getmct = nnz;
-            buffer_4_getmct = CUDA_MALLOC(int, sizeof_buffer_4_getmct, true);
-        }
-        d_output = buffer_4_getmct;
-        d_size = cuCompactor::compact<int>(Col, d_output, nnz, int_predicate(), num_thr, 0, l - f);
-        cudaDeviceSynchronize();
-    }
-    thrust::device_ptr<int> dev_ptr(d_output);
-    if ((*bitcol) == NULL) {
-        thrust::sort(dev_ptr, dev_ptr + d_size);
-    }
-    thrust::device_vector<int> uv(dev_ptr, dev_ptr + d_size);
-    if ((*bitcol) == NULL) {
-        uv.erase(thrust::unique(uv.begin(), uv.end(), int_equal_to()), uv.end());
-    }
-    // -------------------------------------------------------
+        d_out = CUDA_MALLOC(long, nnz, true);
 
-    int* dv_ptr = thrust::raw_pointer_cast(uv.data());
-    uvs[0] = uv.size();
-    int* h_ptr = NULL;
-    if (uvs[0] > 0) {
-        h_ptr = MALLOC(int, uvs[0]);
-        CHECK_DEVICE(cudaMemcpy(h_ptr, dv_ptr, uvs[0] * sizeof(int), cudaMemcpyDeviceToHost));
+        devicePartition(Col, nnz, [l]__device__(const long &x){
+            return x < 0 || x > l;
+        }, d_out, &d_out_size);
+
+        *nonuniquesize = d_out_size;
+
+        thrust::device_ptr<long> dev_out(d_out);
+        thrust::sort(dev_out, dev_out + d_out_size);
+        d_out_size = (thrust::unique(dev_out, dev_out + d_out_size) - dev_out);
+
+        *bitcol = d_out;
+        *bitcolsize = d_out_size;
     }
 
-    if ((*bitcol) == NULL && uvs[0] != 0) {
-        *bitcol = CUDA_MALLOC(int, uvs[0]);
-        CHECK_DEVICE(cudaMemcpy(*bitcol, dv_ptr, uv.size() * sizeof(int), cudaMemcpyDeviceToDevice));
-        *bitcolsize = *uvs;
-    }
+    uvs[0] = d_out_size;
+
+    long* h_ptr = copyArrayToHost(d_out, uvs[0]);
     return h_ptr;
 }
 
@@ -109,7 +119,7 @@ int* getmct(int* Col, int nnz, int f, int l, int* uvs, int** bitcol, int* bitcol
  * @param f The threshold value.
  * @param idx Pointer to an index array for atomic operations.
  */
-__global__ void primo_kernel(int* local, int* uv, int* all, int uvs, int locals, int f, unsigned int* idx)
+__global__ void primo_kernel(long* local, long* uv, long* all, int uvs, int locals, int f, unsigned int* idx)
 {
     unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned int lowerhalo = 0;
@@ -150,7 +160,7 @@ __global__ void primo_kernel(int* local, int* uv, int* all, int uvs, int locals,
  * @param all Pointer to the global output array where results will be stored.
  * @param idx Pointer to an index array that indicates where to start copying in the global array.
  */
-__global__ void secondo_kernel(int* local, int locals, int* all, unsigned int* idx)
+__global__ void secondo_kernel(long* local, int locals, long* all, unsigned int* idx)
 {
     unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < locals) {
@@ -180,50 +190,63 @@ extern bool alloced_idx; ///< Flag indicating whether the index array has been a
  * @param num_thr The number of threads to use for the operation.
  * @return int* Pointer to the host array containing the processed results.
  */
-int* getmct_4shrink(int* Col, int nnz, int f, int l, int first_or_last, int* uvs, int** bitcol, int* bitcolsize, int* post_local, int num_thr)
+long* getmct_4shrink(long* Col, int nnz, int f, int l, int first_or_last, int* uvs, long** bitcol, int* bitcolsize, int* nonuniquesize, int* post_local, int num_thr)
 {
-    int *d_output, d_size;
+    long *d_out = NULL;
+    long *d_in = NULL;
+    size_t d_out_size = 0;
+    size_t d_in_size = 0;
+
     if ((*bitcol) != NULL) {
-        d_output = *bitcol;
-        d_size = bitcolsize[0];
+        d_out      = *bitcol;
+        d_out_size = bitcolsize[0];
     } else {
-        if (nnz > sizeof_buffer_4_getmct) {
-            if (sizeof_buffer_4_getmct > 0) {
-                CUDA_FREE(buffer_4_getmct);
-            }
-            sizeof_buffer_4_getmct = nnz;
-            buffer_4_getmct = CUDA_MALLOC(int, sizeof_buffer_4_getmct, true);
-        }
-        d_output = buffer_4_getmct;
-        d_size = cuCompactor::compact<int>(Col, d_output, nnz, int_predicate(), num_thr, 0, l);
-        cudaDeviceSynchronize();
-    }
-    thrust::device_ptr<int> dev_ptr(d_output);
-    if ((*bitcol) == NULL) {
-        thrust::sort(dev_ptr, dev_ptr + d_size);
-    }
-    thrust::device_vector<int> uv(dev_ptr, dev_ptr + d_size);
-    if ((*bitcol) == NULL) {
-        uv.erase(thrust::unique(uv.begin(), uv.end(), int_equal_to()), uv.end());
+        d_out = CUDA_MALLOC(long, nnz, true);;
+
+        devicePartition(Col, nnz, [l]__device__(const long &x){
+            return x < 0 || x > l;
+        }, d_out, &d_out_size);
+
+        *nonuniquesize = d_out_size;
+
+        thrust::device_ptr<long> dev_out(d_out);
+        thrust::sort(dev_out, dev_out + d_out_size);
+        d_out_size = (thrust::unique(dev_out, dev_out + d_out_size) - dev_out);    
+        
+        *bitcol = d_out;
+        *bitcolsize = d_out_size;
     }
 
-    thrust::device_vector<int> result((l - f + 1) + uv.size(), -1);
+    // -----------------------------------------------------------------
+
+    d_in = d_out + *nonuniquesize;
+    d_in_size = nnz - *nonuniquesize;
+
+    thrust::device_ptr<long> dev_in(d_in);
+    thrust::sort(dev_in, dev_in + d_in_size);
+    d_in_size = (thrust::unique(dev_in, dev_in + d_in_size) - dev_in);
+
+    long d_result_size = d_out_size + d_in_size;
+    long *d_result = CUDA_MALLOC(long, d_result_size);
 
     unsigned int first_post_local;
-    if (first_or_last) {
-        if (first_or_last < 0) {
-            thrust::sequence(result.begin(), result.begin() + l + 1, 0);
-            thrust::copy(uv.begin(), uv.end(), result.begin() + l + 1);
-            first_post_local = 0;
-        } else {
-            thrust::copy(uv.begin(), uv.end(), result.begin());
-            thrust::sequence(result.begin() + uv.size(), result.end(), 0);
-            first_post_local = (unsigned int)uv.size();
+    if (first_or_last < 0) {
+        if (d_in_size) {
+            CHECK_DEVICE(cudaMemcpy(d_result            , d_in , d_in_size  * sizeof(long), cudaMemcpyDeviceToDevice));
         }
+        if (d_out_size) {
+            CHECK_DEVICE(cudaMemcpy(d_result + d_in_size, d_out, d_out_size * sizeof(long), cudaMemcpyDeviceToDevice));
+        }
+        first_post_local = 0;
+    } else if (first_or_last > 0) {
+        if (d_out_size) {
+            CHECK_DEVICE(cudaMemcpy(d_result             , d_out, d_out_size * sizeof(long), cudaMemcpyDeviceToDevice));
+        }
+        if (d_in_size) {
+            CHECK_DEVICE(cudaMemcpy(d_result + d_out_size, d_in , d_in_size  * sizeof(long), cudaMemcpyDeviceToDevice));
+        }
+        first_post_local = d_out_size;
     } else {
-        thrust::device_vector<int> locals(l - f + 1, 1);
-        thrust::sequence(locals.begin(), locals.end(), 0);
-
         if (alloced_idx == false) {
             idx_4shrink = CUDA_MALLOC(unsigned int, 1, true);
             alloced_idx = true;
@@ -232,37 +255,21 @@ int* getmct_4shrink(int* Col, int nnz, int f, int l, int first_or_last, int* uvs
 
         CHECK_DEVICE(cudaMemset(dev_idx, 0, sizeof(unsigned int)));
 
-        int* dv_uv = thrust::raw_pointer_cast(uv.data());
-        int* dv_local = thrust::raw_pointer_cast(locals.data());
-        int* dv_result = thrust::raw_pointer_cast(result.data());
-        GridBlock gb = gb1d(uv.size(), NUM_THR);
+        GridBlock gb = gb1d(d_out_size, NUM_THR);
         if (gb.g.x > 0) {
-            primo_kernel<<<gb.g, gb.b>>>(dv_local, dv_uv, dv_result, uv.size(), locals.size(), 0, dev_idx);
+            primo_kernel<<<gb.g, gb.b>>>(d_in, d_out, d_result, d_out_size, d_in_size, 0, dev_idx);
         }
         CHECK_DEVICE(cudaMemcpy(&first_post_local, dev_idx, sizeof(unsigned int), cudaMemcpyDeviceToHost));
 
-        gb = gb1d(locals.size(), NUM_THR);
+        gb = gb1d(d_in_size, NUM_THR);
         if (gb.g.x > 0) {
-            secondo_kernel<<<gb.g, gb.b>>>(dv_local, locals.size(), dv_result, dev_idx);
+            secondo_kernel<<<gb.g, gb.b>>>(d_in, d_in_size, d_result, dev_idx);
         }
     }
 
-    uvs[0] = result.size();
-    int* dv_ptr = thrust::raw_pointer_cast(result.data());
+    // -----------------------------------------------------------------
 
-    assert(uvs[0] == ((l - f + 1) + uv.size()));
-    assert(uvs[0] >= (l - f));
-
-    if ((*bitcol) == NULL) {
-        int* dv_ptr2 = thrust::raw_pointer_cast(uv.data());
-        *bitcol = CUDA_MALLOC(int, uvs[0]);
-        CHECK_DEVICE(cudaMemcpy(*bitcol, dv_ptr2, uv.size() * sizeof(int), cudaMemcpyDeviceToDevice));
-        *bitcolsize = d_size;
-    }
+    uvs[0] = d_result_size;
     *post_local = (int)first_post_local;
-
-    d_output = CUDA_MALLOC(int, uvs[0]);
-    CHECK_DEVICE(cudaMemcpy(d_output, dv_ptr, uvs[0] * sizeof(int), cudaMemcpyDeviceToDevice));
-
-    return d_output;
+    return d_result;
 }

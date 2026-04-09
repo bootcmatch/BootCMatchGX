@@ -21,15 +21,15 @@ namespace Hierarchy {
         H->A_array = NULL;
         H->P_array = NULL;
         H->R_array = NULL;
-        H->R_local_array = NULL;
-        H->P_local_array = NULL;
+        // H->R_local_array = NULL;
+        // H->P_local_array = NULL;
 
         if (allocate_mem) {
             H->A_array = MALLOC(CSR*, num_levels, true);
             H->P_array = MALLOC(CSR*, num_levels - 1, true);
             H->R_array = MALLOC(CSR*, num_levels - 1, true);
-            H->R_local_array = MALLOC(CSR*, num_levels - 1, true);
-            H->P_local_array = MALLOC(CSR*, num_levels - 1, true);
+            // H->R_local_array = MALLOC(CSR*, num_levels - 1, true);
+            // H->P_local_array = MALLOC(CSR*, num_levels - 1, true);
             H->D_array = MALLOC(vector<vtype>*, num_levels, true);
             H->M_array = MALLOC(vector<vtype>*, num_levels, true);
 
@@ -37,8 +37,8 @@ namespace Hierarchy {
                 H->D_array[i] = NULL;
                 if (i != H->num_levels - 1) {
                     H->R_array[i] = NULL;
-                    H->R_local_array[i] = NULL;
-                    H->P_local_array[i] = NULL;
+                    // H->R_local_array[i] = NULL;
+                    // H->P_local_array[i] = NULL;
                 }
                 H->M_array[i] = NULL;
             }
@@ -70,12 +70,12 @@ namespace Hierarchy {
                     if (H->R_array[i] != NULL) {
                         CSRm::free(H->R_array[i]);
                     }
-                    if (H->R_local_array[i] != NULL) {
-                        CSRm::free(H->R_local_array[i]);
-                    }
-                    if (H->P_local_array[i] != NULL) {
-                        CSRm::free(H->P_local_array[i]);
-                    }
+                    // if (H->R_local_array[i] != NULL) {
+                    //     CSRm::free(H->R_local_array[i]);
+                    // }
+                    // if (H->P_local_array[i] != NULL) {
+                    //     CSRm::free(H->P_local_array[i]);
+                    // }
                 }
             }
 
@@ -117,11 +117,11 @@ namespace Hierarchy {
         H->R_array = (CSR**)realloc(H->R_array, (levels_used - 1) * sizeof(CSR*));
         CHECK_HOST(H->R_array);
 
-        H->R_local_array = (CSR**)realloc(H->R_local_array, (levels_used - 1) * sizeof(CSR*));
-        CHECK_HOST(H->R_local_array);
+        // H->R_local_array = (CSR**)realloc(H->R_local_array, (levels_used - 1) * sizeof(CSR*));
+        // CHECK_HOST(H->R_local_array);
 
-        H->P_local_array = (CSR**)realloc(H->P_local_array, (levels_used - 1) * sizeof(CSR*));
-        CHECK_HOST(H->P_local_array);
+        // H->P_local_array = (CSR**)realloc(H->P_local_array, (levels_used - 1) * sizeof(CSR*));
+        // CHECK_HOST(H->P_local_array);
     }
 
     long getNNZglobal(CSR* A)
@@ -177,6 +177,32 @@ namespace Hierarchy {
         logf(fp, "Current cmplx for V-cycle                    : %lf\n", h->op_cmplx);
         logf(fp, "Current cmplx for W-cycle                    : %lf\n", h->op_wcmplx);
         logf(fp, "Average Coarsening Ratio                     : %lf\n", h->avg_cratio);
+    }
+
+    void printAvgInfo(FILE* fp, hierarchy** H_array, int n_hrc)
+    {
+        /* printing statistics */
+        double avgnumlev = 0.0;
+        double avgcmpx = 0.0;
+        double avgwcmpx = 0.0;
+        double avgcratio = 0.0;
+        
+        for (int k = 0; k < n_hrc; k++) {
+            avgnumlev += H_array[k]->num_levels;
+            avgcmpx   += H_array[k]->op_cmplx;
+            avgwcmpx  += H_array[k]->op_wcmplx;
+            avgcratio += H_array[k]->avg_cratio;
+        }
+
+        avgnumlev /= n_hrc;
+        avgcmpx   /= n_hrc;
+        avgwcmpx  /= n_hrc;
+        avgcratio /= n_hrc;
+
+        logf(fp, "Avg of number of levels                      : %lf\n", avgnumlev);
+        logf(fp, "Avg of current cmplx for V-cycle             : %lf\n", avgcmpx);
+        logf(fp, "Avg of current cmplx for W-cycle             : %lf\n", avgwcmpx);
+        logf(fp, "Average of coarsening Ratio                  : %lf\n", avgcratio);
     }
 }
 
@@ -290,7 +316,7 @@ namespace ApplyData {
         logf(fp, "relax_weight                                 : %f\n", ad->relax_weight);
     }
 
-    applyData* initByParams(const params& p)
+    applyData* initByParams(const InputParameters& p)
     {
         applyData* amg_cycle = AMG::ApplyData::initDefault();
 
@@ -363,7 +389,7 @@ namespace BootBuildData {
         logf(fp, "solver_it                                    : %d\n", ad->solver_it);
     }
 
-    bootBuildData* initByParams(CSR* A, params p)
+    bootBuildData* initByParams(CSR* A, const InputParameters& p)
     {
         bootBuildData* bootamg_data = AMG::BootBuildData::initDefault();
         buildData* amg_data = bootamg_data->amg_data;

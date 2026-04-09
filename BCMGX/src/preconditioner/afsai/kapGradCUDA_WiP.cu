@@ -11,15 +11,15 @@
 
 /**
  * @brief Performs a binary search for a value within a sorted array.
- * 
- * This device function implements a binary search algorithm to find the index of the 
+ *
+ * This device function implements a binary search algorithm to find the index of the
  * given value in the sorted array `array[]`. If the value is not present, it returns
  * the position where the value should be inserted.
- * 
+ *
  * @param array A sorted array of integers.
  * @param size The number of elements in the array.
  * @param value The value to search for in the array.
- * 
+ *
  * @return The index where the value is found or where it should be inserted.
  */
 __device__ int binsearch(int array[], unsigned int size, int value)
@@ -40,12 +40,12 @@ __device__ int binsearch(int array[], unsigned int size, int value)
 
 /**
  * @brief Computes the minimum value among a set of values using warp-wide synchronization.
- * 
- * This device function computes the minimum value among the input value `val` and its 
+ *
+ * This device function computes the minimum value among the input value `val` and its
  * values from other threads in the same warp, using shuffle-based synchronization.
- * 
+ *
  * @param val The value to compare with other values in the warp.
- * 
+ *
  * @return The minimum value within the warp.
  */
 __device__ int computemin(int val)
@@ -69,12 +69,12 @@ __device__ int computemin(int val)
 
 /**
  * @brief Computes the next power of 2 greater than or equal to a given value.
- * 
- * This device function calculates the next power of 2 greater than or equal to the 
+ *
+ * This device function calculates the next power of 2 greater than or equal to the
  * input integer `x` using bitwise operations.
- * 
+ *
  * @param x The input value.
- * 
+ *
  * @return The smallest power of 2 greater than or equal to `x`.
  */
 __device__ unsigned int nextPow2(unsigned int x)
@@ -90,12 +90,12 @@ __device__ unsigned int nextPow2(unsigned int x)
 
 /**
  * @brief Performs a parallel sorting and updating process for rows in a matrix.
- * 
- * This inline device function performs a sorting procedure on the values in `R_vec`, 
- * associates them with their respective indices in `I_vec`, and updates them based on 
- * specific criteria. It uses warp-level synchronization to ensure correct ordering 
+ *
+ * This inline device function performs a sorting procedure on the values in `R_vec`,
+ * associates them with their respective indices in `I_vec`, and updates them based on
+ * specific criteria. It uses warp-level synchronization to ensure correct ordering
  * and atomic operations for updating the values.
- * 
+ *
  * @param n The total number of elements to be sorted.
  * @param ncut The cutoff value for sorting.
  * @param R_vec A pointer to the vector of values to be sorted.
@@ -160,14 +160,14 @@ __inline__ __device__ void RISortSplit(int n, int ncut, REALafsai* R_vec, int* I
 
 /**
  * @brief CUDA kernel for processing and updating matrix rows in parallel.
- * 
- * This kernel performs various operations on matrix rows, including element-wise 
- * computations, sorting, and updating of the `WI` and `WR` arrays. It uses warp-wide 
+ *
+ * This kernel performs various operations on matrix rows, including element-wise
+ * computations, sorting, and updating of the `WI` and `WR` arrays. It uses warp-wide
  * synchronization for efficient parallel execution and atomic operations for thread-safety.
- * 
- * The kernel processes a subset of matrix rows and applies the necessary computations 
+ *
+ * The kernel processes a subset of matrix rows and applies the necessary computations
  * based on input coefficients, right-hand side values, and other parameters.
- * 
+ *
  * @param nrows The total number of rows in the matrix.
  * @param lastrow The last row index to process.
  * @param rowsinpa The number of rows in parallel.

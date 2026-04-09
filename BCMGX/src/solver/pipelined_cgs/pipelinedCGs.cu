@@ -30,7 +30,7 @@ void pipecomputevm(vector<vtype>* sUR, vector<vtype>* sUQ, int s, vector<vtype>*
     Vector::copydhToH<vtype>(svm);
 }
 
-int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x0_loc, const params& p, cgsprec* pr, SolverOut* o)
+int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x0_loc, const InputParameters& ip, const CurrentParameters& cp, Preconditioner* pr, SolverOut* o)
 {
     _MPI_ENV;
 
@@ -42,9 +42,9 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
     stype ln = Alocal->n;
     gstype fn = Alocal->full_n;
 
-    int s = p.sstep;
+    int s = cp.sstep;
 
-    o->resHist = MALLOC(vtype, p.itnlim, true);
+    o->resHist = MALLOC(vtype, ip.itnlim, true);
 
     vector<vtype>* u_loc = Vector::init<vtype>(ln, true, true);
     vector<vtype>* u1_loc = Vector::init<vtype>(ln, true, true);
@@ -103,10 +103,10 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
 
     vtype* temp;
 
-    mpk(h, Alocal, r_loc, s, sP2, pr, u1_loc, p, o);
+    mpk(h, Alocal, r_loc, s, sP2, pr, u1_loc, ip, cp, o);
 
     CHECK_DEVICE(cudaMemcpy(sUR2m->val, sP2->val, s * ln * sizeof(vtype), cudaMemcpyDeviceToDevice));
-    if (pr->ptype != PreconditionerType::NONE) {
+    if (pr->type != PreconditionerType::NONE) {
         CHECK_DEVICE(cudaMemcpy(sUQ2m->val, sP2->val + s * ln, s * ln * sizeof(vtype), cudaMemcpyDeviceToDevice));
     } else {
         CHECK_DEVICE(cudaMemcpy(sUQ2m->val, sP2->val + ln, s * ln * sizeof(vtype), cudaMemcpyDeviceToDevice));
@@ -119,7 +119,7 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
 
     MPI_Request request;
 
-    if (p.stop_criterion == 1) {
+    if (ip.stop_criterion == 1) {
         delta0 = Vector::norm_MPI(h->cublas_h, r_loc);
     }
 
@@ -127,7 +127,7 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
         o->resHist[0] = delta0;
     }
 
-    for (iter = 0; iter < p.itnlim; iter++) {
+    for (iter = 0; iter < ip.itnlim; iter++) {
         if (iter % 2 == 0) { // even
             if (iter > 0) {
                 for (j = 1; j < s + 1; j++) {
@@ -143,7 +143,7 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
                 }
             }
 
-            pipecomputevm(sUR2m, sUQ2m, s, r_loc, vm, svm, pr->ptype != PreconditionerType::NONE);
+            pipecomputevm(sUR2m, sUQ2m, s, r_loc, vm, svm, pr->type != PreconditionerType::NONE);
 
             BEGIN_PROF("ALLREDUCE");
             CHECK_MPI(MPI_Iallreduce(svm->val_, vm->val_, 2 * s, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &request));
@@ -152,7 +152,7 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
             temp = AMs_loc->val;
             AMs_loc->val = sUQ2m->val + ln * (s - 1);
 
-            mpk(h, Alocal, AMs_loc, s, sT, pr, u1_loc, p, o);
+            mpk(h, Alocal, AMs_loc, s, sT, pr, u1_loc, ip, cp, o);
 
             AMs_loc->val = temp;
 
@@ -174,7 +174,7 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
                 CHECK_DEVICE(cudaMemcpy(sUR2m->val + j * (s * ln), sUR2m->val + j * ln, (s - j) * ln * sizeof(vtype), cudaMemcpyDeviceToDevice));
                 CHECK_DEVICE(cudaMemcpy(sUR2m->val + j * (s * ln) + (s - j) * ln, sT->val, j * ln * sizeof(vtype), cudaMemcpyDeviceToDevice));
                 CHECK_DEVICE(cudaMemcpy(sUQ2m->val + j * (s * ln), sUQ2m->val + j * ln, (s - j) * ln * sizeof(vtype), cudaMemcpyDeviceToDevice));
-                if (pr->ptype != PreconditionerType::NONE) {
+                if (pr->type != PreconditionerType::NONE) {
                     CHECK_DEVICE(cudaMemcpy(sUQ2m->val + j * (s * ln) + (s - j) * ln, sT->val + s * ln, j * ln * sizeof(vtype), cudaMemcpyDeviceToDevice));
                 } else {
                     CHECK_DEVICE(cudaMemcpy(sUQ2m->val + j * (s * ln) + (s - j) * ln, sT->val + ln, j * ln * sizeof(vtype), cudaMemcpyDeviceToDevice));
@@ -204,7 +204,7 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
                 mydgemv2v(sUQ2m->val + (j + 1) * s * ln, ln, s, alpha->val, sUQ2->val + j * ln, sminusone, sUQ1m->val + j * ln);
             }
 
-            pipecomputevm(sUR1m, sUQ1m, s, r_loc, vm, svm, pr->ptype != PreconditionerType::NONE);
+            pipecomputevm(sUR1m, sUQ1m, s, r_loc, vm, svm, pr->type != PreconditionerType::NONE);
 
             BEGIN_PROF("ALLREDUCE");
             CHECK_MPI(MPI_Iallreduce(svm->val_, vm->val_, 2 * s, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD, &request));
@@ -213,7 +213,7 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
             temp = AMs_loc->val;
             AMs_loc->val = sUQ1m->val + ln * (s - 1);
 
-            mpk(h, Alocal, AMs_loc, s, sT, pr, u1_loc, p, o);
+            mpk(h, Alocal, AMs_loc, s, sT, pr, u1_loc, ip, cp, o);
 
             AMs_loc->val = temp;
 
@@ -236,7 +236,7 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
                 CHECK_DEVICE(cudaMemcpy(sUR1m->val + j * (s * ln) + (s - j) * ln, sT->val, j * ln * sizeof(vtype), cudaMemcpyDeviceToDevice));
 
                 CHECK_DEVICE(cudaMemcpy(sUQ1m->val + j * (s * ln), sUQ1m->val + j * ln, (s - j) * ln * sizeof(vtype), cudaMemcpyDeviceToDevice));
-                if (pr->ptype != PreconditionerType::NONE) {
+                if (pr->type != PreconditionerType::NONE) {
                     CHECK_DEVICE(cudaMemcpy(sUQ1m->val + j * (s * ln) + (s - j) * ln, sT->val + s * ln, j * ln * sizeof(vtype), cudaMemcpyDeviceToDevice));
                 } else {
                     CHECK_DEVICE(cudaMemcpy(sUQ1m->val + j * (s * ln) + (s - j) * ln, sT->val + ln, j * ln * sizeof(vtype), cudaMemcpyDeviceToDevice));
@@ -253,13 +253,13 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
         l2_norm = Vector::norm_MPI(h->cublas_h, r_loc);
 
         if (ISMASTER) {
-            if (p.dispnorm) {
+            if (ip.dispnorm) {
                 printf("%d) r norm: %.10lf\n", iter, l2_norm);
             }
             o->resHist[iter + 1] = l2_norm;
         }
 
-        if (l2_norm < p.rtol * delta0) {
+        if (l2_norm < ip.rtol * delta0) {
             excnlim = 0;
             retval = 0;
             break;
@@ -297,7 +297,7 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
     Vector::free(W);
     Vector::free(Wcopy);
     Vector::free(u1_loc);
-    if (pr->ptype != PreconditionerType::NONE) {
+    if (pr->type != PreconditionerType::NONE) {
         Vector::free(u_loc);
     }
 
@@ -309,7 +309,7 @@ int pipelinedcgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vty
     return retval;
 }
 
-vector<vtype>* solve_pipelined_cgs(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x0_loc, cgsprec* pr, const params& p, SolverOut* out)
+vector<vtype>* solve_pipelined_cgs(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x0_loc, Preconditioner* pr, const InputParameters& ip, const CurrentParameters& cp, SolverOut* out)
 {
 #if USECUDAPROFILER
     if (myid == 0) {
@@ -317,7 +317,7 @@ vector<vtype>* solve_pipelined_cgs(handles* h, CSR* Alocal, vector<vtype>* rhs_l
     }
 #endif
 
-    out->retv = pipelinedcgsstep(h, Alocal, rhs_loc, x0_loc, p, pr, out);
+    out->retv = pipelinedcgsstep(h, Alocal, rhs_loc, x0_loc, ip, cp, pr, out);
 
 #if USECUDAPROFILER
     if (myid == 0) {

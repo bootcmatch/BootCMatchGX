@@ -40,25 +40,21 @@ int main(int argc, char** argv)
             break;
         case 'h':
         default:
-            printf(USAGE, argv[0]);
-            exit(EXIT_FAILURE);
+            DIE(USAGE, argv[0]);
         }
     }
 
     if (in_file_name == NULL || out_file_name == NULL) {
-        printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        DIE(USAGE, argv[0]);
     }
 
     if (log_file_name) {
         log_file = fopen(log_file_name, "w");
         if (!log_file) {
-            printf("Error opening log file");
-            exit(1);
+            DIE("Error opening log file");
         }
         if (atexit(close_log_file)) {
-            fprintf(stderr, "Error registering atexit\n");
-            exit(EXIT_FAILURE);
+            DIE("Error registering atexit\n");
         }
     }
 

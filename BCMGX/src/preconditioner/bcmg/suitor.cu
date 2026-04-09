@@ -57,7 +57,8 @@ __device__ void set_suitor(int candidate, double heaviest, int current_vid, int*
     if (heaviest > 0 && candidate >= 0) {
         int next_vertex = -1;
         *finished = _FALSE; /* case when you don't get lock */
-        *new_vertex_to_care = current_vid;;
+        *new_vertex_to_care = current_vid;
+        ;
         lock_vertex(d_locks, candidate);
         if (heaviest >= ws_[candidate]) { // test whether "heaviest" is still larger than previous offer to "candidate"
             next_vertex = s_[candidate]; // save previous suitor of "candidate" as it is un-lodged by "current_vid"
@@ -300,34 +301,6 @@ __global__ void _fix_shift_matching(int n, int* M, int shift)
     }
 }
 
-vector<int>* approx_match_gpu_suitor(handles* h, CSR* A, CSR* W, vector<itype>* M, vector<double>* ws, vector<int>* mutex)
-{
-    _MPI_ENV;
-    assert(W->on_the_device);
-    int n = W->n;
-
-    vector<int>* _bitcol = NULL;
-    _bitcol = get_missing_col(A, NULL);
-    Vector::fillWithValue(M, -1);
-    Vector::fillWithValue(ws, 0.0);
-    Vector::fillWithValue(mutex, 0);
-
-    int load_per_blk = CHUNK_PER_WARP * (NTHREAD_PER_BLK / WARP_SIZE); // NTHREAD_PER_BLK is multiple of 32
-
-    int nr_of_block = (n + load_per_blk - 1) / load_per_blk;
-
-    int shared_memory_size_per_block = (CHUNK_PER_WARP + 1) * (NTHREAD_PER_BLK / WARP_SIZE) * sizeof(int);
-    // get dev_bit col to pass to compute_rows. This is sync
-
-    kernel_for_matching<<<nr_of_block, NTHREAD_PER_BLK, shared_memory_size_per_block>>>(n, W->row, M->val, ws->val, W->col, W->val, mutex->val, 0 /* W->row_shift */);
-
-    compute_rows_to_rcv_CPU(A, NULL, _bitcol);
-    Vector::free(_bitcol);
-
-    cudaDeviceSynchronize();
-    return M;
-}
-
 vector<int>* approx_match_gpu_suitor_v0(CSR* W, vector<itype>* M, vector<double>* ws, vector<int>* mutex)
 {
     assert(W->on_the_device);
@@ -357,121 +330,37 @@ vector<int>* approx_match_gpu_suitor_v0(CSR* W, vector<itype>* M, vector<double>
     return M;
 }
 
-template <typename T>
-vector<int>* approx_match_cpu_suitor(CSR* W_)
-{
-    CSR* W = CSRm::copyToHost(W_);
-    int* row = W->row;
-    int* col = W->col;
-    T* val = W->val;
-    int n = W->n;
-
-    // prepare
-    vector<int>* suitor = Vector::init<int>(n, true, false);
-
-    T* ws = MALLOC(T, n);
-    for (int i = 0; i < n; i++) {
-        suitor->val[i] = -1;
-        ws[i] = -1;
-    }
-
-    // algorithm
-    for (int i = 0; i < n; i++) {
-        int u = i;
-        int current = u;
-        bool done = false;
-
-        while (!done) {
-            int partner = suitor->val[current];
-            T heaviest = ws[current];
-            for (int j = row[current]; j < row[current + 1]; j++) {
-                int v = col[j];
-                if (SUITOR_GT(val[j], heaviest) && SUITOR_GT(val[j], ws[v])) {
-                    partner = v;
-                    heaviest = val[j];
-                }
-            }
-
-            done = true;
-
-            if (heaviest != -1) {
-                int y = suitor->val[partner];
-                suitor->val[partner] = current;
-                ws[partner] = heaviest;
-                if (y != -1) {
-                    current = y;
-                    done = false;
-                }
-            }
-        }
-    }
-    FREE(ws);
-
-    CSRm::free(W);
-
-    return Vector::copyToDevice(suitor);
-}
-
-template <typename T>
-vector<int>* approx_match_cpu_suitor_LOCAL(CSR* W_)
+vector<int>* approx_match_gpu_suitor(handles* h, CSR* A, CSR* W, vector<itype>* M, vector<double>* ws, vector<int>* mutex)
 {
     _MPI_ENV;
-
-    CSR* W = CSRm::copyToHost(W_);
-    int* row = W->row;
-    int* col = W->col;
-    T* val = W->val;
+    assert(W->on_the_device);
     int n = W->n;
 
-    // prepare
-    vector<int>* suitor = Vector::init<int>(n, true, false);
-
-    T* ws = MALLOC(T, n);
-    for (int i = 0; i < n; i++) {
-        suitor->val[i] = -1;
-        ws[i] = -1.;
+    if (A->col8 == NULL) {
+        DIE("Horror: A (%p)->col8 NULL\n", A);
     }
 
-    int W_start = W->row_shift;
-    int W_stop = W->row_shift + W->n;
+    assert(CSRm::checkSizeAndShift(A, W)); // TODO: remove this
 
-    // algorithm
-    for (int i = 0; i < n; i++) {
-        int u = i;
-        int current = u;
-        bool done = false;
+    vector<gsstype>* _bitcol = get_missing_col(A, NULL);
+    Vector::fillWithValue(M, -1);
+    Vector::fillWithValue(ws, 0.0);
+    Vector::fillWithValue(mutex, 0);
 
-        while (!done) {
-            int partner = suitor->val[current];
-            T heaviest = ws[current];
-            for (int j = row[current]; j < row[current + 1]; j++) {
-                int v = col[j];
-                v = v - W->row_shift;
+    int load_per_blk = CHUNK_PER_WARP * (NTHREAD_PER_BLK / WARP_SIZE); // NTHREAD_PER_BLK is multiple of 32
 
-                if (v < 0 || v >= n) {
-                    continue;
-                }
+    int nr_of_block = (n + load_per_blk - 1) / load_per_blk;
 
-                if (val[j] > heaviest && val[j] > ws[v]) {
-                    partner = v;
-                    heaviest = val[j];
-                }
-            }
+    int shared_memory_size_per_block = (CHUNK_PER_WARP + 1) * (NTHREAD_PER_BLK / WARP_SIZE) * sizeof(int);
+    // get dev_bit col to pass to compute_rows. This is sync
 
-            done = true;
+    kernel_for_matching<<<nr_of_block, NTHREAD_PER_BLK, shared_memory_size_per_block>>>(n, W->row, M->val, ws->val, W->col, W->val, mutex->val, 0 /* W->row_shift */);
 
-            if (heaviest != -1) {
-                int y = suitor->val[partner];
-                suitor->val[partner] = current;
-                ws[partner] = heaviest;
-                if (y != -1) {
-                    current = y;
-                    done = false;
-                }
-            }
-        }
-    }
-    FREE(ws);
-    CSRm::free(W);
-    return Vector::copyToDevice(suitor);
+    compute_rows_to_rcv_CPU(A, NULL, _bitcol);
+    cudaDeviceSynchronize();
+    Vector::free(_bitcol);
+
+    return M;
 }
+
+

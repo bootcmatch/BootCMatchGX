@@ -7,7 +7,7 @@
 
 #define USE_SPLITTED_PRODUCT 0
 
-void mpk(handles* h, CSR* Alocal, vector<vtype>* x_loc, int s, vector<vtype>* sP, cgsprec* pr, vector<vtype>* y_loc, const params& p, SolverOut* out)
+void mpk(handles* h, CSR* Alocal, vector<vtype>* x_loc, int s, vector<vtype>* sP, Preconditioner* pr, vector<vtype>* y_loc, const InputParameters& ip, const CurrentParameters& cp, SolverOut* out)
 {
     _MPI_ENV;
     BEGIN_PROF(__FUNCTION__);
@@ -18,7 +18,7 @@ void mpk(handles* h, CSR* Alocal, vector<vtype>* x_loc, int s, vector<vtype>* sP
     vtype* xtemp = x_loc->val;
     vtype* ytemp = y_loc->val;
 
-    if (pr->ptype == PreconditionerType::NONE) {
+    if (pr->type == PreconditionerType::NONE) {
         Vector::copyTo(sP, x_loc, (nprocs > 1) ? *(Alocal->os.streams->comm_stream) : 0);
 
         for (i = 0; i < s; i++) {
@@ -32,7 +32,7 @@ void mpk(handles* h, CSR* Alocal, vector<vtype>* x_loc, int s, vector<vtype>* sP
         Vector::fillWithValue(y_loc, 0.);
 
         cudaDeviceSynchronize();
-        prec_apply(h, Alocal, x_loc, y_loc, pr, p, &out->precOut);
+        prec_apply(h, Alocal, x_loc, y_loc, pr, ip);
         // cudaDeviceSynchronize();
 
         pin = 0;
@@ -67,7 +67,7 @@ void mpk(handles* h, CSR* Alocal, vector<vtype>* x_loc, int s, vector<vtype>* sP
             } else {
                 Vector::fillWithValue(y_loc, 0.);
                 cudaDeviceSynchronize();
-                prec_apply(h, Alocal, x_loc, y_loc, pr, p, &out->precOut);
+                prec_apply(h, Alocal, x_loc, y_loc, pr, ip);
                 // cudaDeviceSynchronize();
             }
             ptemp = pin;

@@ -3,6 +3,7 @@
 #include "preconditioner/bcmg/matching.h"
 #include "utility/memory.h"
 #include "utility/profiling.h"
+#include "utility/col8.h"
 
 extern int* taskmap;
 extern int* itaskmap;
@@ -106,7 +107,7 @@ __global__ void _make_P_row(itype n, itype* P_row)
 
 void* d_temp_storage = NULL;
 
-CSR* makeP_GPU(CSR* A, vector<itype>* M, vector<vtype>* w, bool used_by_solver = true)
+CSR* makeP_GPU(CSR* A, vector<itype>* M, vector<vtype>* w)
 {
     BEGIN_PROF(__FUNCTION__);
 
@@ -147,7 +148,7 @@ CSR* makeP_GPU(CSR* A, vector<itype>* M, vector<vtype>* w, bool used_by_solver =
         M->n,
         m);
 
-    itype* num_selected_out = Scalar::getvalueFromDevice(d_num_selected_out);
+    itype* num_selected_out = Scalar::getValueFromDevice(d_num_selected_out);
     gb = gb1d(*num_selected_out, BLOCKSIZE);
     _aggregate_symmetric_sort<<<gb.g, gb.b>>>(*num_selected_out, P->col, M->val, comp_Pcol);
 
@@ -155,7 +156,7 @@ CSR* makeP_GPU(CSR* A, vector<itype>* M, vector<vtype>* w, bool used_by_solver =
     _aggregate_symmetric_step_two<<<gb.g, gb.b>>>(A->n, P->val, M->val, P->col, w->val, d_num_selected_out->val, A->row_shift);
 
     FREE(num_selected_out);
-    num_selected_out = Scalar::getvalueFromDevice(d_num_selected_out);
+    num_selected_out = Scalar::getValueFromDevice(d_num_selected_out);
     P->m = (*num_selected_out);
 
     gb = gb1d(A->n + 1, BLOCKSIZE);
@@ -165,73 +166,92 @@ CSR* makeP_GPU(CSR* A, vector<itype>* M, vector<vtype>* w, bool used_by_solver =
     CUDA_FREE(d_temp_storage);
     Scalar::free(d_num_selected_out);
 
+    col2col8(P->col, P->col8, P->nnz);
+
     END_PROF(__FUNCTION__);
     return P;
 }
 
-void matchingPairAggregation(handles* h, buildData* amg_data, CSR* A, vector<vtype>* w, CSR** _P, CSR** _R, bool used_by_solver)
+void matchingPairAggregation(handles* h, buildData* amg_data, CSR* A, vector<vtype>* w, CSR** _P, CSR** _R)
 {
+    static int counter = 0;
+
     BEGIN_PROF(__FUNCTION__);
 
     _MPI_ENV;
 
+    assert(A);
+    assert(A->col8);
     vector<itype>* M = suitor(h, amg_data, A, w);
 
-    CSR *R, *P;
+    CSR *P = makeP_GPU(A, M, w);
 
-    P = makeP_GPU(A, M, w, used_by_solver);
+    // {
+    //     char fname[1024] = {0};
+    //     snprintf(fname, 1024, "%s/%s%s%d_id%d_nprocs%d.mtx", output_dir.c_str(), "", "preP", counter, myid, nprocs);
+    //     CSRm::printMM(P, fname, false);
+    // }
 
-    gstype mt_shifts[nprocs], m_shifts[nprocs];
-    gstype ms[nprocs];
+    CSR *R = CSRm::Transpose_local(P, log_file);
+    CSRm::shift_cols(R, P->row_shift);
 
     // get colum numbers other process
     if (nprocs > 1) {
-        // send columns numbers to each process
-        CHECK_MPI(
-            MPI_Allgather(
-                &P->m,
-                sizeof(gstype),
-                MPI_BYTE,
-                ms,
-                sizeof(gstype),
-                MPI_BYTE,
-                MPI_COMM_WORLD));
+        gstype shifts[nprocs];
+        gstype cols[nprocs];
 
-        gstype tot_m = 0;
+        CHECK_MPI(MPI_Allgather(
+            &P->m,
+            sizeof(gstype),
+            MPI_BYTE,
+            cols,
+            sizeof(gstype),
+            MPI_BYTE,
+            MPI_COMM_WORLD
+        ));
+
+        gstype tot_cols = 0;
 
         for (int i = 0; i < nprocs; i++) {
-            mt_shifts[i] = tot_m;
-            tot_m += ms[taskmap[i]];
-        }
-        for (int i = 0; i < nprocs; i++) {
-            m_shifts[i] = mt_shifts[itaskmap[i]];
+            shifts[taskmap ? taskmap[i] : i] = tot_cols;
+            tot_cols += cols[taskmap ? taskmap[i] : i];
         }
 
-#if defined(GENERAL_TRANSPOSE)
-        CSRm::shift_cols(P, P->row_shift);
-        R = CSRm::transpose(P, log_file, "R");
-#else
-        R = CSRm::Transpose_local(P, log_file);
-#endif
-        CSRm::shift_cols(R, P->row_shift);
-        R->row_shift = m_shifts[myid];
+        P->m = tot_cols;
 
-#if defined(GENERAL_TRANSPOSE)
-        CSRm::shift_cols(P, m_shifts[myid] - P->row_shift);
-#else
-        CSRm::shift_cols(P, m_shifts[myid]);
-#endif
-
-        P->m = tot_m;
-        R->full_n = tot_m;
-    } else {
-        R = CSRm::Transpose_local(P, log_file);
+        TRACE("Shifting P's cols = %lu", shifts[myid]);
+        R->row_shift = shifts[myid];
+        CSRm::shift_cols(P, shifts[myid]);
     }
+    R->full_n = P->m;
+
+    // {
+    //     char fname[1024] = {0};
+    //     snprintf(fname, 1024, "%s/%smpa%d_%s_id%d_nprocs%d.mtx", output_dir.c_str(), "", counter, "P", myid, nprocs);
+    //     CSRm::printMM(P, fname, false);
+    // }
+    // {
+    //     char fname[1024] = {0};
+    //     snprintf(fname, 1024, "%s/%smpa%d_%s_id%d_nprocs%d.mtx", output_dir.c_str(), "", counter, "R", myid, nprocs);
+    //     CSRm::printMM(R, fname, false);
+    // }
+
+    // CSR *Raux = CSRm::transpose(P, log_file);
+    // {
+    //     char fname[1024] = {0};
+    //     snprintf(fname, 1024, "%s/%smpa%d_%s_id%d_nprocs%d.mtx", output_dir.c_str(), "", counter, "Raux", myid, nprocs);
+    //     CSRm::printMM(Raux, fname, false);
+    // }
+    // CSRm::free(Raux);
 
     FREE(M);
 
+    // col2col8(R->col, R->col8, R->nnz);
+
     *_P = P;
     *_R = R;
+
+    counter++;
 
     END_PROF(__FUNCTION__);
 }

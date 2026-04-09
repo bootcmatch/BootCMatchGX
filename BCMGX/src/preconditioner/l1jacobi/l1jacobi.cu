@@ -1,7 +1,6 @@
 #include "halo_communication/halo_communication.h"
 #include "op/addAbsoluteRowSumNoDiag.h"
 #include "op/basic.h"
-#include "op/diagScal.h"
 #include "op/mydiag.h"
 #include "preconditioner/l1jacobi/l1jacobi.h"
 #include "preconditioner/prec_setup.h"
@@ -108,8 +107,7 @@ vector<vtype>* internal_jacobi_overlapped(cublasHandle_t cublas_h, int k, CSR* A
     halo_info hi = A->halo;
 
     if (A->shrinked_flag == false) {
-        fprintf(stderr, "A must be shrinked before relaxation!\n");
-        exit(1);
+        DIE("A must be shrinked before relaxation!\n");
     }
 
     int post_local = A->post_local;
@@ -124,7 +122,9 @@ vector<vtype>* internal_jacobi_overlapped(cublasHandle_t cublas_h, int k, CSR* A
     vector<vtype>* orig_u = u;
     vector<vtype>* orig_u_ = *u_;
     for (int i = 0; i < k; i++) {
+#if 0
         cudaStreamSynchronize(*(os.streams->comm_stream));
+#endif
 
         // start get to send
         {
@@ -173,8 +173,7 @@ vector<vtype>* internal_jacobi_overlapped(cublasHandle_t cublas_h, int k, CSR* A
                         MPI_Irecv(hi.what_to_receive + (hi.to_receive_spls[t]), hi.to_receive_counts[t], VTYPE_MPI, t, JACOBI_TAG, MPI_COMM_WORLD, requests + j));
                     j++;
                     if (j == MAXNTASKS) {
-                        fprintf(stderr, "Too many tasks in jacobi, max is %d\n", MAXNTASKS);
-                        exit(1);
+                        DIE("Too many tasks in jacobi, max is %d\n", MAXNTASKS);
                     }
                 }
             }
@@ -266,9 +265,10 @@ vector<vtype>* internal_jacobi_overlapped(cublasHandle_t cublas_h, int k, CSR* A
         }
     }
 
+#if 0
     cudaStreamSynchronize(*(os.streams->local_stream));
     cudaStreamSynchronize(*(os.streams->comm_stream));
-
+#endif
     if (hi.to_receive_n > 0) {
         std::free(x_);
     }
@@ -307,17 +307,25 @@ vector<vtype>* jacobi_adaptive_miniwarp_overlapped(
     int density = A->nnz / A->n;
 
     vector<vtype>* ret = NULL;
+#if 0    
     if (density < MINI_WARP_THRESHOLD_2) {
         ret = internal_jacobi_overlapped<2>(cublas_h, k, A, u, u_, f, D, relax_weight);
     } else if (density < MINI_WARP_THRESHOLD_4) {
         ret = internal_jacobi_overlapped<4>(cublas_h, k, A, u, u_, f, D, relax_weight);
     } else if (density < MINI_WARP_THRESHOLD_8) {
-        ret = internal_jacobi_overlapped<4>(cublas_h, k, A, u, u_, f, D, relax_weight);
+        ret = internal_jacobi_overlapped<8>(cublas_h, k, A, u, u_, f, D, relax_weight);
     } else if (density < MINI_WARP_THRESHOLD_16) {
         ret = internal_jacobi_overlapped<16>(cublas_h, k, A, u, u_, f, D, relax_weight);
     } else {
         ret = internal_jacobi_overlapped<32>(cublas_h, k, A, u, u_, f, D, relax_weight);
     }
+#else    
+    if (density < MINI_WARP_THRESHOLD_8) {
+        ret = internal_jacobi_overlapped<2>(cublas_h, k, A, u, u_, f, D, relax_weight);
+    } else {
+        ret = internal_jacobi_overlapped<8>(cublas_h, k, A, u, u_, f, D, relax_weight);
+    }
+#endif
 
     // #if DEBUG_JACOBI
     //     dump(u, "%s/%s_%04d_%04d_%s_u_p%d%s.txt",
@@ -410,6 +418,7 @@ vector<vtype>* jacobi_adaptive_miniwarp_coarsest(handles* h, int k, CSR* A, vect
     int density = A->nnz / A->n;
 
     vector<vtype>* ret = NULL;
+#if 0   
     if (density < MINI_WARP_THRESHOLD_2) {
         ret = internal_jacobi_coarsest<2>(k, A, u, u_, f, D, relax_weight);
     } else if (density < MINI_WARP_THRESHOLD_4) {
@@ -421,6 +430,13 @@ vector<vtype>* jacobi_adaptive_miniwarp_coarsest(handles* h, int k, CSR* A, vect
     } else {
         ret = internal_jacobi_coarsest<32>(k, A, u, u_, f, D, relax_weight);
     }
+#else
+    if (density < MINI_WARP_THRESHOLD_8) {
+        ret = internal_jacobi_coarsest<2>(k, A, u, u_, f, D, relax_weight);
+    } else {
+        ret = internal_jacobi_coarsest<8>(k, A, u, u_, f, D, relax_weight);
+    }
+#endif
 
     return ret;
 }
@@ -492,7 +508,7 @@ void set_l1j(CSR* Alocal, vector<vtype>* pl1j_loc)
     addAbsoluteRowSumNoDiag(Alocal, pl1j_loc);
 }
 
-void l1jacobi_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
+void l1jacobi_setup(handles* h, CSR* Alocal, Preconditioner* pr, const InputParameters& p)
 {
     pr->l1jacobi.pl1j = Vector::init<vtype>(Alocal->n, true, true);
     pr->l1jacobi.w_loc = Vector::init<vtype>(Alocal->n, true, true);
@@ -501,7 +517,7 @@ void l1jacobi_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p)
     set_l1j(Alocal, pr->l1jacobi.pl1j);
 }
 
-void l1jacobi_finalize(CSR* Alocal, cgsprec* pr, const params& p)
+void l1jacobi_finalize(CSR* Alocal, Preconditioner* pr, const InputParameters& p)
 {
     Vector::free(pr->l1jacobi.pl1j);
     if (p.l1jacsweeps % 2 == 0) {
@@ -510,11 +526,11 @@ void l1jacobi_finalize(CSR* Alocal, cgsprec* pr, const params& p)
     Vector::free(pr->l1jacobi.rcopy_loc);
 }
 
-void l1jacobi_apply(handles* h, CSR* Alocal, vector<vtype>* r_loc, vector<vtype>* u_loc, cgsprec* pr, const params& p, PrecOut* out)
+void l1jacobi_apply(handles* h, CSR* Alocal, vector<vtype>* r_loc, vector<vtype>* u_loc, Preconditioner* pr, const InputParameters& ip)
 {
     CHECK_DEVICE(cudaMemcpy(pr->l1jacobi.rcopy_loc->val, r_loc->val, r_loc->n * sizeof(vtype), cudaMemcpyDeviceToDevice));
     l1jacobi_iter(h,
-        p.l1jacsweeps,
+        ip.l1jacsweeps,
         Alocal,
         pr->l1jacobi.pl1j,
         pr->l1jacobi.rcopy_loc, // rhs

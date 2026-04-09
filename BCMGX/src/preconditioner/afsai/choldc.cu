@@ -1,4 +1,5 @@
 #include "choldc.h"
+#include "utility/die.h"
 
 __global__ void cudacholdc1(int n, int initVal, int* position, int* iat, int* ja, REALafsai* coef, int* iat_Filter, int* ja_Filter, REALafsai* coef_Filter)
 {
@@ -88,7 +89,11 @@ void choldc(int number, int n[], REALafsai* l, REALafsai* x, int* done, int orow
     int nThreads = BLOCKDIMENSION;
     nBlocks = (number + nThreads - 1) / nThreads;
     cudacholdcMix<<<nBlocks, nThreads>>>(n, number, l, x, done, orow);
-    MY_CHECK_ERROR("cudacholdcMix");
+    cudaError_t err = cudaGetLastError();
+    if (cudaSuccess != err) {
+        DIE("Cuda error: %s in file '%s' in line %i : %s, nthreads=%d, nblocks=%d, n=%p, number=%d.\n",
+            "cudacholdcMix", __FILE__, __LINE__, cudaGetErrorString(err), nThreads, nBlocks, n, number);
+    }
 }
 
 /*
@@ -100,5 +105,9 @@ void choldc1(int number, int* position, int* iat, int* ja, REALafsai* coef, int*
     int nThreads = BLOCKDIMENSION;
     int nBlocks = (number + nThreads - 1) / nThreads;
     cudacholdc1<<<nBlocks, nThreads>>>(number, initVal, position, iat, ja, coef, iat_Filter, ja_Filter, coef_Filter);
-    MY_CHECK_ERROR("cudacholdc1");
+    cudaError_t err = cudaGetLastError();
+    if (cudaSuccess != err) {
+        DIE("Cuda error: %s in file '%s' in line %i : %s, nthreads=%d, nblocks=%d, n=%d, number=%d.\n",
+            "cudacholdc1", __FILE__, __LINE__, cudaGetErrorString(err), nThreads, nBlocks, n, number);
+    }
 }

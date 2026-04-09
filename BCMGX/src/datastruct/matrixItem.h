@@ -1,6 +1,6 @@
 /**
  * @file
- * 
+ *
  * This file contains definitions for structs and functions related to matrix item manipulation,
  * particularly for operations in sparse matrix formats (like CSR).
  */
@@ -14,8 +14,8 @@
  * @brief Custom type to represent an item of a matrix.
  */
 struct matrixItem_t {
-    long row;   ///< Row index of the matrix item.
-    long col;   ///< Column index of the matrix item.
+    long row; ///< Row index of the matrix item.
+    long col; ///< Column index of the matrix item.
     double val; ///< Value of the matrix item.
 };
 
@@ -27,7 +27,7 @@ struct MatrixItemColumnIndexLessThanSelector {
 
     /**
      * @brief Constructor to initialize the lower threshold.
-     * 
+     *
      * @param lower The column index threshold.
      */
     __host__ __device__ __forceinline__ explicit MatrixItemColumnIndexLessThanSelector(const long lower)
@@ -37,7 +37,7 @@ struct MatrixItemColumnIndexLessThanSelector {
 
     /**
      * @brief Comparison operator to check if the matrix item's column is less than the lower threshold.
-     * 
+     *
      * @param x The matrix item to compare.
      * @return True if the column index of `x` is less than the lower threshold.
      */
@@ -55,7 +55,7 @@ struct MatrixItemColumnIndexGreaterThanSelector {
 
     /**
      * @brief Constructor to initialize the upper threshold.
-     * 
+     *
      * @param upper The column index threshold.
      */
     __host__ __device__ __forceinline__ explicit MatrixItemColumnIndexGreaterThanSelector(const long upper)
@@ -65,7 +65,7 @@ struct MatrixItemColumnIndexGreaterThanSelector {
 
     /**
      * @brief Comparison operator to check if the matrix item's column is greater than the upper threshold.
-     * 
+     *
      * @param x The matrix item to compare.
      * @return True if the column index of `x` is greater than the upper threshold.
      */
@@ -84,7 +84,7 @@ struct MatrixItemColumnIndexOutOfBoundsSelector {
 
     /**
      * @brief Constructor to initialize the lower and upper bounds.
-     * 
+     *
      * @param lower The lower bound for the column index.
      * @param upper The upper bound for the column index.
      */
@@ -96,7 +96,7 @@ struct MatrixItemColumnIndexOutOfBoundsSelector {
 
     /**
      * @brief Comparison operator to check if the matrix item's column is out of bounds.
-     * 
+     *
      * @param x The matrix item to compare.
      * @return True if the column index of `x` is outside the bounds (lower, upper).
      */
@@ -115,7 +115,7 @@ struct MatrixItemColumnIndexInBoundsSelector {
 
     /**
      * @brief Constructor to initialize the lower and upper bounds.
-     * 
+     *
      * @param lower The lower bound for the column index.
      * @param upper The upper bound for the column index.
      */
@@ -127,7 +127,7 @@ struct MatrixItemColumnIndexInBoundsSelector {
 
     /**
      * @brief Comparison operator to check if the matrix item's column is within the bounds.
-     * 
+     *
      * @param x The matrix item to compare.
      * @return True if the column index of `x` is within the bounds (lower, upper).
      */
@@ -145,7 +145,7 @@ struct MatrixItemComparator {
 
     /**
      * @brief Constructor to initialize the number of columns.
-     * 
+     *
      * @param ncols The number of columns in the matrix.
      */
     __host__ __device__ __forceinline__
@@ -156,7 +156,7 @@ struct MatrixItemComparator {
 
     /**
      * @brief Comparison operator for matrix items based on their row and column indices.
-     * 
+     *
      * @param a The first matrix item.
      * @param b The second matrix item.
      * @return True if `a` is less than `b` based on row and column indices.
@@ -168,7 +168,7 @@ struct MatrixItemComparator {
 
     /**
      * @brief Function to compute a unique linear index for a matrix item based on row and column indices.
-     * 
+     *
      * @param a The matrix item.
      * @return The linear index corresponding to the matrix item's row and column.
      */
@@ -188,7 +188,7 @@ struct MatrixItemTransposedComparator {
 
     /**
      * @brief Constructor to initialize the number of rows.
-     * 
+     *
      * @param nrows The number of rows in the matrix.
      */
     __host__ __device__ __forceinline__
@@ -199,7 +199,7 @@ struct MatrixItemTransposedComparator {
 
     /**
      * @brief Comparison operator for matrix items based on their transposed row and column indices.
-     * 
+     *
      * @param a The first matrix item.
      * @param b The second matrix item.
      * @return True if `a` is less than `b` based on transposed row and column indices.
@@ -211,7 +211,7 @@ struct MatrixItemTransposedComparator {
 
     /**
      * @brief Function to compute a unique linear index for a transposed matrix item.
-     * 
+     *
      * @param a The matrix item.
      * @return The linear index corresponding to the transposed matrix item's row and column.
      */
@@ -229,13 +229,12 @@ struct MatrixItemTransposedComparator {
 struct MatrixItemColumnMapper {
     /**
      * @brief Extracts the column index from a matrix item.
-     * 
+     *
      * @param a The matrix item.
      * @return The column index of the matrix item.
      */
-    __host__ __device__ __forceinline__
-        itype
-        operator()(const matrixItem_t& a) const
+    __host__ __device__ __forceinline__ long // itype
+    operator()(const matrixItem_t & a) const
     {
         return a.col;
     }
@@ -248,16 +247,16 @@ extern MPI_Datatype MPI_MATRIX_ITEM_T;
 
 /**
  * @brief Registers the MPI datatype for `matrixItem_t`.
- * 
+ *
  * This function registers the custom MPI datatype for `matrixItem_t` to be used in MPI communications.
  */
 void registerMatrixItemMpiDatatypes();
 
 /**
  * @brief Debug function to print matrix items.
- * 
+ *
  * This function prints the contents of a matrix item array to a file for debugging purposes.
- * 
+ *
  * @param title The title to display.
  * @param arr The array of matrix items.
  * @param len The length of the array.
@@ -268,9 +267,9 @@ void debugMatrixItems(const char* title, matrixItem_t* arr, size_t len, bool isO
 
 /**
  * @brief Fills the CSR representation from a vector of matrix items.
- * 
+ *
  * This function converts a list of matrix items to a CSR (Compressed Sparse Row) format.
- * 
+ *
  * @param items The array of matrix items.
  * @param nnz The number of non-zero elements.
  * @param n The number of rows in the matrix.
@@ -288,15 +287,16 @@ void fillCsrFromMatrixItems(
     int rowShift,
     itype** rowRet,
     itype** colRet,
+    gsstype** colRet8,
     vtype** valRet,
     bool transposed,
     bool allocateMemory);
 
 /**
  * @brief Fills the CSR representation without GPU support.
- * 
+ *
  * This function converts a list of matrix items to a CSR format without GPU acceleration.
- * 
+ *
  * @param items The array of matrix items.
  * @param nnz The number of non-zero elements.
  * @param n The number of rows in the matrix.
@@ -314,6 +314,7 @@ void fillCsrFromMatrixItems_nogpu(
     int rowShift,
     itype** rowRet,
     itype** colRet,
+    gsstype** colRet8,
     vtype** valRet,
     bool transposed,
     bool allocateMemory);

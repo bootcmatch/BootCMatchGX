@@ -1,5 +1,6 @@
 #include "op/basic.h"
 #include "utility/cudamacro.h"
+#include "utility/distribute.h"
 #include "utility/memory.h"
 #include "utility/profiling.h"
 #include "utility/utils.h"
@@ -9,6 +10,11 @@
 #include <type_traits>
 
 #include <unistd.h>
+
+#include <curand_kernel.h>
+#include <algorithm>
+#include <random>
+#include "datastruct/FiniteElements.h"
 
 #define BUFSIZE 1024
 
@@ -20,7 +26,7 @@ vector<T>* init(unsigned int n, bool allocate_mem, bool on_the_device)
     if (n == 0) {
         fprintf(stderr, "error in Vector::init: n as int = %d, n as unsigned int = %u\n", n, n);
     }
-    assert(n > 0);
+    ASSERT(n > 0);
     vector<T>* v = MALLOC(vector<T>, 1);
 
     v->n = n;
@@ -41,7 +47,7 @@ vector<T>* init(unsigned int n, bool allocate_mem, bool on_the_device)
 template <typename T>
 vectordh<T>* initdh(int n)
 {
-    assert(n > 0);
+    ASSERT(n > 0);
     vectordh<T>* v = MALLOC(vectordh<T>, 1, true);
     v->n = n;
     v->val = CUDA_MALLOC(T, n, true);
@@ -71,7 +77,7 @@ void freedh(vectordh<T>* v)
 {
     CUDA_FREE(v->val);
 
-    assert(v->val_);
+    ASSERT(v->val_);
     FREE(v->val_);
 
     FREE(v);
@@ -89,19 +95,60 @@ __global__ void _fillKernel(int n, T* v, const T val)
 }
 
 template <typename T>
+__global__ void _fillKernelRandom(int n, T* v, const T min, const T max, unsigned long long seed)
+{
+    int tidx = threadIdx.x + blockDim.x * blockIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    // Inizializza stato curand
+    curandState state;
+    curand_init(seed, tidx, 0, &state);
+
+    for (; tidx < n; tidx += stride) {
+        // Genera numero casuale in [0, 1)
+        T r = curand_uniform(&state);
+        // Scala in [min, max)
+        v[tidx] = min + r * (max - min);
+    }
+
+    // for (; tidx < n; tidx += stride) {
+    //     v[tidx] = val;
+    // }
+}
+
+template <typename T>
 void fillWithValue(vector<T>* v, T value)
 {
     if (v->on_the_device) {
         if (value == 0) {
+            // _MPI_ENV;
+            // fprintf(stderr, "myid = %d, v->n = %d, v->val = %p\n", myid, v->n, v->val);
             cudaError_t err = cudaMemset(v->val, value, v->n * sizeof(T));
             CHECK_DEVICE(err);
         } else {
             dim3 block(BLOCKSIZE);
             dim3 grid(ceil((double)v->n / (double)block.x));
             _fillKernel<<<grid, block>>>(v->n, v->val, value);
+            // CHECK_DEVICE(cudaDeviceSynchronize());
         }
     } else {
         std::fill_n(v->val, v->n, value);
+    }
+}
+
+template <typename T>
+void fillWithRandomValues(vector<T>* v, T min, T max, unsigned long long seed)
+{
+    if (v->on_the_device) {
+        dim3 block(BLOCKSIZE);
+        dim3 grid(ceil((double)v->n / (double)block.x));
+        _fillKernelRandom<<<grid, block>>>(v->n, v->val, min, max, seed);
+    } else {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<> distrib(min, max);
+
+        std::generate_n(v->val, v->n, [&]() { return distrib(gen); });
     }
 }
 
@@ -144,7 +191,7 @@ vector<T>* localize_global_vector(vector<T>* global_v, int local_len, int shift)
     if (global_v->n < local_len + shift) {
         printf("(global_v->n = %d) < (local_len = %d) + (shift = %d)\n", global_v->n, local_len, shift);
     }
-    assert(global_v->n >= local_len + shift);
+    ASSERT(global_v->n >= local_len + shift);
     vector<T>* local_v = NULL;
     if (global_v->on_the_device) {
         local_v = Vector::init<T>(local_len, true, true);
@@ -161,7 +208,7 @@ vector<T>* localize_global_vector(vector<T>* global_v, int local_len, int shift)
 template <typename T>
 vector<T>* copyToDevice(vector<T>* v)
 {
-    assert(!v->on_the_device);
+    ASSERT(!v->on_the_device);
 
     int n = v->n;
 
@@ -212,7 +259,7 @@ template <typename T>
 vector<T>* copyToHost(vector<T>* v_d)
 {
 
-    assert(v_d->on_the_device);
+    ASSERT(v_d->on_the_device);
 
     int n = v_d->n;
 
@@ -234,7 +281,7 @@ void free(vector<T>* v)
         if (v->on_the_device) {
             CUDA_FREE(v->val);
         } else {
-            assert(v->val);
+            ASSERT(v->val);
             FREE(v->val);
         }
         FREE(v);
@@ -248,7 +295,7 @@ void freeAsync(vector<T>* v, cudaStream_t stream)
     if (v->on_the_device) {
         CUDA_FREE_ASYNC_STREAM(v->val, stream);
     } else {
-        assert(v->val > 0);
+        ASSERT(v->val);
         FREE(v->val);
     }
     FREE(v);
@@ -300,7 +347,7 @@ bool equals(vector<T>* a, vector<T>* b)
 template <typename T>
 bool is_zero(vector<T>* a)
 {
-    assert(a != NULL);
+    ASSERT(a != NULL);
     vector<T>* a_ = NULL;
     bool a_dev_flag, r = true;
 
@@ -330,8 +377,7 @@ vector<T>* load(const char* file_name, bool on_the_device)
 {
     FILE* fp = fopen(file_name, "r");
     if (fp == NULL) {
-        fprintf(stdout, "Error opening file %s, errno = %d: %s\n", file_name, errno, strerror(errno));
-        exit(1);
+        DIE("Error opening file %s, errno = %d: %s\n", file_name, errno, strerror(errno));
     }
 
     int n = 0;
@@ -346,17 +392,17 @@ vector<T>* load(const char* file_name, bool on_the_device)
     while (fgets(buffer, BUFSIZE, fp) != NULL) {
         T val;
         int read = 0;
-        if (std::is_same<T, int>::value) {
+        if constexpr (std::is_same<T, int>::value) {
             read = sscanf(buffer, "%d", &val);
-        } else if (std::is_same<T, double>::value) {
+        } else if constexpr (std::is_same<T, long>::value) {
+            read = sscanf(buffer, "%ld", &val);
+        } else if constexpr (std::is_same<T, double>::value) {
             read = sscanf(buffer, "%lf", &val);
         } else {
-            printf("Error loading vector from %s: unknown type at line %d\n", file_name, n + 1);
-            exit(1);
+            DIE("Error loading vector from %s: unknown type at line %d\n", file_name, n + 1);
         }
         if (read != 1) {
-            printf("Error loading vector from %s: Missing value at line %d\n", file_name, n + 1);
-            exit(1);
+            DIE("Error loading vector from %s: Missing value at line %d\n", file_name, n + 1);
         }
         v->val[n] = val;
 
@@ -395,10 +441,12 @@ void print(vector<T>* v, int n_, FILE* fp)
 
     int i;
     for (i = 0; i < n; i++) {
-        if (std::is_same<T, int>::value) {
+        if constexpr (std::is_same<T, int>::value) {
             fprintf(fp, "%d\n", v_->val[i]);
-        } else if (std::is_same<T, double>::value) {
+        } else if constexpr (std::is_same<T, double>::value) {
             fprintf(fp, "%g\n", v_->val[i]);
+        } else if constexpr (std::is_same<T, long>::value) {
+            fprintf(fp, "%ld\n", v_->val[i]);
         } else {
             fprintf(fp, "unknown type");
         }
@@ -424,7 +472,7 @@ __global__ void _elementwise_div(itype n, T* a, T* b, T* c)
 template <typename T>
 vector<T>* elementwise_div(vector<T>* a, vector<T>* b, vector<T>* c)
 {
-    assert(a->n == b->n);
+    ASSERT(a->n == b->n);
 
     if (c == NULL) {
         c = Vector::init<T>(a->n, true, true);
@@ -442,14 +490,14 @@ T dot(cublasHandle_t handle, vector<T>* a, vector<T>* b, int stride_a, int strid
 {
     BEGIN_PROF(__FUNCTION__);
 
-    assert(a->on_the_device == b->on_the_device);
+    ASSERT(a->on_the_device == b->on_the_device);
     T result;
 
 #if USE_CUSTOM_DDOT
-    assert(stride_a == 1);
-    assert(stride_b == 1);
-    assert(a->n == b->n);
-    assert(sizeof(T) == sizeof(double));
+    ASSERT(stride_a == 1);
+    ASSERT(stride_b == 1);
+    ASSERT(a->n == b->n);
+    ASSERT(sizeof(T) == sizeof(double));
     T* d_result = NULL;
     CHECK_DEVICE(cudaMalloc(&d_result, sizeof(T)));
     myddot(a->n, a->val, b->val, d_result);
@@ -468,8 +516,8 @@ T dot(cublasHandle_t handle, vector<T>* a, vector<T>* b, int stride_a, int strid
 template <typename T>
 void axpy(cublasHandle_t handle, vector<T>* x, vector<T>* y, T alpha, int inc)
 {
-    assert(x->on_the_device == y->on_the_device);
-    assert(x->n == y->n);
+    ASSERT(x->on_the_device == y->on_the_device);
+    ASSERT(x->n == y->n);
 
     cublasStatus_t cublas_state;
     cublas_state = cublasDaxpy(handle, x->n, &alpha, x->val, inc, y->val, inc);
@@ -479,8 +527,8 @@ void axpy(cublasHandle_t handle, vector<T>* x, vector<T>* y, T alpha, int inc)
 template <typename T>
 void axpyWithOff(cublasHandle_t handle, vector<T>* x, vector<T>* y, T alpha, itype n, itype off)
 {
-    assert(x->on_the_device == y->on_the_device);
-    assert(x->n == y->n);
+    ASSERT(x->on_the_device == y->on_the_device);
+    ASSERT(x->n == y->n);
     int inc = 1;
 
     cublasStatus_t cublas_state;
@@ -494,7 +542,7 @@ T norm_MPI(cublasHandle_t handle, vector<T>* a)
     BEGIN_PROF(__FUNCTION__);
 
     _MPI_ENV;
-    assert(a->on_the_device);
+    ASSERT(a->on_the_device);
 
     double result_local = dot(handle, a, a);
     double result = 0.;
@@ -518,7 +566,7 @@ T norm_MPI(cublasHandle_t handle, vector<T>* a)
 template <typename T>
 T norm(cublasHandle_t handle, vector<T>* a, int stride_a)
 {
-    assert(a->on_the_device);
+    ASSERT(a->on_the_device);
 
     T result;
     cublasStatus_t cublas_state;
@@ -531,11 +579,70 @@ template <typename T>
 void scale(cublasHandle_t handle, vector<T>* x, T alpha, int inc)
 {
 
-    assert(x->on_the_device);
+    ASSERT(x->on_the_device);
 
     cublasStatus_t cublas_state;
     cublas_state = cublasDscal(handle, x->n, &alpha, x->val, inc);
     CHECK_CUBLAS(cublas_state);
+}
+
+template <typename T>
+void fillWithValues(vector<T>* v, int full_n, std::initializer_list<T> list)
+{
+    _MPI_ENV;
+
+    ASSERT(!v->on_the_device);
+    ASSERT(list.size() == full_n);
+
+    int rowsPerProcess = full_n / nprocs;
+    int rowShift = rowsPerProcess * myid;
+
+    int nextRowShift = (rowsPerProcess * (myid + 1));
+    if (myid == nprocs - 1) {
+        nextRowShift += full_n % nprocs;
+    }
+
+    for (int index = rowShift; index < nextRowShift; index++) {
+        vtype val = *(list.begin() + index);
+        v->val[index - rowShift] = val;
+    }
+}
+
+template <typename T>
+vector<T>* createTestVector(int full_n, std::initializer_list<T> values)
+{
+    _MPI_ENV;
+
+    int n = full_n / nprocs;
+    if (myid == nprocs - 1) {
+        n += full_n % nprocs;
+    }
+
+    vector<vtype>* h_local = Vector::init<vtype>(
+        n, // n
+        true, // allocate_mem
+        false // on_the_device
+    );
+
+    Vector::fillWithValues(h_local, full_n, values);
+
+    vector<vtype>* d_local = Vector::copyToDevice(h_local);
+    cudaDeviceSynchronize();
+    Vector::free(h_local);
+
+    return d_local;
+}
+
+template <typename T>
+void debug(vector<T>* v, FILE* out)
+{
+    _MPI_ENV;
+
+    vector<T>* global = aggregate_vector_all(v);
+    if (ISMASTER) {
+        Vector::print(global, -1, out);
+    }
+    Vector::free(global);
 }
 
 // only for very hard DEBUG
@@ -593,7 +700,10 @@ namespace Collection {
 namespace Vector {
 template vector<itype>* init<itype>(unsigned int, bool, bool);
 template vector<gstype>* init<gstype>(unsigned int, bool, bool);
+template vector<gsstype>* init<gsstype>(unsigned int, bool, bool);
 template vector<vtype>* init<vtype>(unsigned int, bool, bool);
+template vector<Node>* Vector::init<Node>(unsigned int, bool, bool);
+template vector<Element>* Vector::init<Element>(unsigned int, bool, bool);
 
 template vectordh<vtype>* initdh<vtype>(int);
 template void copydhToD<vtype>(vectordh<vtype>*);
@@ -602,6 +712,7 @@ template void freedh<vtype>(vectordh<vtype>*);
 
 template void fillWithValue<itype>(vector<itype>*, itype);
 template void fillWithValue<vtype>(vector<vtype>*, vtype);
+template void fillWithRandomValues<vtype>(vector<vtype>* v, vtype min, vtype max, unsigned long long seed);
 template void fillWithValueWithOff<vtype>(vector<vtype>*, vtype, itype, itype);
 
 template vector<itype>* clone<itype>(vector<itype>*);
@@ -620,12 +731,17 @@ template vector<itype>* copyToHost<itype>(vector<itype>*);
 template vector<vtype>* copyToHost<vtype>(vector<vtype>*);
 
 template void free<itype>(vector<itype>*);
+template void free<gsstype>(vector<gsstype>*);
 template void free<vtype>(vector<vtype>*);
+template void Vector::free<Node>(vector<Node>*);
+template void Vector::free<Element>(vector<Element>*);
 
 template vector<itype>* load<itype>(const char* file_name, bool on_the_device);
 template vector<vtype>* load<vtype>(const char* file_name, bool on_the_device);
+template vector<long>* load<long>(const char* file_name, bool on_the_device);
 
 template void print<itype>(vector<itype>*, int, FILE*);
+template void print<gsstype>(vector<gsstype>*, int, FILE*);
 template void print<vtype>(vector<vtype>*, int, FILE*);
 
 template vtype dot<vtype>(cublasHandle_t, vector<vtype>*, vector<vtype>*, int, int);
@@ -638,6 +754,9 @@ template void axpy<vtype>(cublasHandle_t, vector<vtype>*, vector<vtype>*, vtype,
 template void axpyWithOff<vtype>(cublasHandle_t, vector<vtype>*, vector<vtype>*, vtype, itype, itype);
 
 template void scale<vtype>(cublasHandle_t, vector<vtype>*, vtype, int);
+template void fillWithValues<vtype>(vector<vtype>* v, int full_n, std::initializer_list<vtype> list);
+template vector<vtype>* createTestVector<vtype>(int full_n, std::initializer_list<vtype> values);
+template void debug<vtype>(vector<vtype>* v, FILE* out);
 
 namespace Collection {
 

@@ -1,5 +1,10 @@
 HOSTNAME := $(shell hostname)
 
+ifndef MAKEFLAGS
+NUM_CORES := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu)
+MAKEFLAGS += -j$(NUM_CORES)
+endif
+
 # ===========================================================================
 # CUDA_DIR
 # ===========================================================================
@@ -52,8 +57,22 @@ MPI_DIR         := /leonardo/prod/opt/libraries/openmpi/4.1.6/gcc--12.2.0
 MPI_INCLUDE_DIR := $(MPI_DIR)/include
 MPIRUN          := $(MPI_DIR)/bin/mpirun
 endif
+ifeq ($(shell test -d /usr/local/lib/openmpi && echo -n yes),yes)
+MPI_DIR         := /usr/local/lib/openmpi
+MPI_INCLUDE_DIR := /usr/local/include/openmpi
+MPIRUN          := $(MPI_DIR)/bin/mpirun
+endif
+
 ifeq ($(MPI_DIR),)
 $(error Could not find MPI_DIR: please edit config.mk)
+endif
+
+# ===========================================================================
+# GFORTRAN
+# ===========================================================================
+
+ifeq ($(shell test -d /usr/lib/x86_64-linux-gnu && echo -n yes),yes)
+LIBS += -L/usr/lib/gcc/x86_64-linux-gnu/13
 endif
 
 # ===========================================================================
@@ -66,37 +85,29 @@ endif
 ifeq ($(shell test -d ../../lapack-master && echo -n yes),yes)
 LAPACK_LIB := ../../lapack-master
 endif
+ifeq ($(shell test -d ../../../../InstalledSW/LAPACK/lapack-master && echo -n yes),yes)
+LAPACK_LIB := ../../../../InstalledSW/LAPACK/lapack-master
+endif
 
-# ===========================================================================
-# MKL
-# ===========================================================================
-
-ifeq ($(shell test -d /apps/SPACK/0.19.1/opt/linux-almalinux8-zen/gcc-8.5.0/intel-oneapi-mkl-2023.2.0-pjoibhyqpiwpgaqtj7joxyjs6ix5g3jy && echo -n yes),yes)
-MKL_DIR := /apps/SPACK/0.19.1/opt/linux-almalinux8-zen/gcc-8.5.0/intel-oneapi-mkl-2023.2.0-pjoibhyqpiwpgaqtj7joxyjs6ix5g3jy
+ifeq ($(LAPACK_LIB),)
+$(error Could not find LAPACK_LIB: please edit config.mk)
 endif
 
 # ===========================================================================
 # Order of preference for usage inside scalar_work:
 # - LAPACK
-# - MKL
 # - Custom
 # ===========================================================================
 
 ifeq ($(LAPACK_LIB),)
 # Could not find LAPACK
-ifeq ($(MKL_DIR),)
-# Could not find MKL
 SW_USE_LIB := 0
-else
-# Found MKL
-SW_USE_LIB := 1
-USE_MKL    := 1
-endif
 else
 # LAPACK found
 SW_USE_LIB := 1
-USE_MKL    := 0
 endif
+
+USE_MKL := 0
 
 # ===========================================================================
 USE_CUDA_MEMCHECK = 0
@@ -104,24 +115,29 @@ USE_CUDA_PROFILER = 0
 # ===========================================================================
 
 CUDA_GPU_ARCH   = sm_80
-CPP_STD         = -std=c++14
+CPP_STD         = -std=c++17
 
 CC = gcc
 NVCC = $(CUDA_DIR)/bin/nvcc
-NVCC_FLAG = -DOMPI_SKIP_MPICXX $(CPP_STD)
+NVCC_FLAG = -DOMPI_SKIP_MPICXX $(CPP_STD) --extended-lambda
 GPU_ARCH = -arch=$(CUDA_GPU_ARCH) -m64
 
-LIBS = -lcuda -lcudart -lcublas -lcusolver -lcurand -L$(MPI_DIR)/lib -lmpi -lnvToolsExt -lnvidia-ml #-lpthread
-INCLUDE = -Isrc  -I$(MPI_INCLUDE_DIR) -I$(NSPARSE_PATH)/inc -Iinclude
+LIBS += -lcuda -lcudart -lcublas -lcusolver -lcurand -L$(MPI_DIR)/lib -lmpi -lnvToolsExt -lnvidia-ml -lcusparse #-lpthread
+INCLUDE = -Isrc  -I$(MPI_INCLUDE_DIR) -I$(NSPARSE_PATH)/inc -I$(NSP_PATH)/inc -Iinclude
 DEFINE = #-DGENERAL_TRANSPOSE #-DDETAILED_TIMING
 
 export LD_LIBRARY_PATH+=$(MPI_DIR)/lib
 
 NSPARSE_PATH = ../EXTERNAL/nsparse-master/cuda-c
 NSPARSE_GPU_ARCH = $(GPU_ARCH)
+
+NSP_PATH = ../EXTERNAL/nsp-main/nsp
+NSP_GPU_ARCH = $(GPU_ARCH)
+
 # NUMDIFF = /home/giacomop/numdiff-5.9.0/numdiff
 MKDIR := @mkdir -p
 FORMATTER := clang-format -i
+COPY := cp
 
 LINTER           = clang-tidy --quiet -header-filter=.*
 LINTER_FLAGS     = $(INCLUDE) --cuda-gpu-arch=$(CUDA_GPU_ARCH) --cuda-path=$(CUDA_DIR) $(CPP_STD)
@@ -143,21 +159,6 @@ LINTER_ISYSTEM   = -isystem $(CUDA_DIR)/include
 ifeq ($(SW_USE_LIB),1)
 DEFINE += -DSW_USE_LIB
 
-ifeq ($(USE_MKL),1)
-# Use MKL: please, adjust the following variables according to your system
-ifeq ($(MKL_DIR),)
-$(error Could not find MKL_DIR: please edit config.mk)
-endif
-
-MKL_INCDIR  = $(MKL_DIR)/mkl/2023.2.0/include
-MKL_LIBDIR  = $(MKL_DIR)/mkl/2023.2.0/lib/intel64
-MKL_COMPDIR = $(MKL_DIR)/compiler/2023.2.0/linux/compiler/lib/intel64_lin
-
-DEFINE += -DUSEMKL 
-
-INCLUDE += -I$(MKL_INCDIR)
-LIBS    += -L${MKL_LIBDIR} -L$(MKL_COMPDIR) -lmkl_core -lmkl_intel_lp64 -liomp5 -lmkl_intel_thread
-else
 # Use LAPACK+CBLAS: please, adjust the following variables according to your system
 ifeq ($(LAPACK_LIB),)
 $(error Could not find LAPACK_LIB: please edit config.mk)
@@ -169,16 +170,10 @@ CBLAS_LIB = $(LAPACK_LIB)
 
 INCLUDE += -I${LAPACK_INC} -I${CBLAS_INC}
 LIBS    += -L${LAPACK_LIB} -llapack -lrefblas -llapacke -lcblas -lgfortran
-endif #ifeq ($(USE_MKL),1)
-
 endif #ifeq ($(SW_USE_LIB),1)
 
-#NVCC_OPT = -O3 -std=c++14 -DUSE_NVTX
-#CC_OPT = -O3
 #CUDA_MEMCHECK =
-#NVCC_OPT = -g -G -std=c++14 -DUSE_NVTX -Xcompiler -rdynamic #-lineinfo
-#CC_OPT = -g -rdynamic -lineinfo
-NVCC_OPT = -O3 -std=c++14 -DUSE_NVTX -Xcompiler -rdynamic -lineinfo
+NVCC_OPT = -O3 $(CPP_STD) -DUSE_NVTX -Xcompiler -rdynamic -lineinfo
 CC_OPT = -O3 -rdynamic -lineinfo
 
 ifeq ($(USE_CUDA_MEMCHECK),1)
@@ -188,6 +183,10 @@ endif
 ifeq ($(USE_CUDA_PROFILER),1)
 CUDA_PROFILER = $(CUDA_DIR)/bin/nsys profile
 endif
+
+$(info    NVCC_OPT is $(NVCC_OPT))
+$(info    NVCC_FLAG is $(NVCC_FLAG))
+$(info    LIBS is $(LIBS))
 
 NPROCS = 4
 

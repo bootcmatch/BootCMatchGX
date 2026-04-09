@@ -11,6 +11,36 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+enum class SpSpLib {
+    CUSPARSE,
+    NSPARSE,
+    NSP,
+    // NSP2,
+    INVALID
+};
+
+extern SpSpLib SPSP_LIB;
+
+/**
+ * @brief Utility function to convert a string to SpSpLib.
+ *
+ * This function maps a string value to the corresponding SpSpLib enum value.
+ *
+ * @param str The string representation of a solver type.
+ * @return Corresponding SpSpLib enum value.
+ */
+SpSpLib string_to_spsplib(const std::string& str);
+
+/**
+ * @brief Utility function to convert SpSpLib to a string.
+ *
+ * This function converts a SpSpLib enum value to its corresponding string representation.
+ *
+ * @param val The SpSpLib enum value.
+ * @return Corresponding string representation.
+ */
+std::string spsplib_to_string(const SpSpLib& val);
+
 /**
  * @brief Merges two sorted arrays into a third array.
  *
@@ -37,7 +67,7 @@ itype merge(itype a[], itype b[], itype c[], itype n1, itype n2);
  * @param used_by_solver A boolean indicating if the result is used by a solver.
  * @return CSR* Pointer to the resulting sparse matrix after multiplication.
  */
-CSR* nsparseMGPU(CSR* Alocal, CSR* Pfull, csrlocinfo* Plocal, bool used_by_solver = true);
+CSR* nsparseMGPU(CSR* Alocal, CSR* Pfull, csrlocinfo* Plocal /*, bool used_by_solver = true*/);
 
 // void sym_mtx(CSR* Alocal);
 
@@ -51,7 +81,7 @@ CSR* nsparseMGPU(CSR* Alocal, CSR* Pfull, csrlocinfo* Plocal, bool used_by_solve
  * @param Plocal Pointer to the local information of the sparse matrix.
  * @return vector<int>* Pointer to a vector containing the missing column indices.
  */
-vector<int>* get_missing_col(CSR* Alocal, CSR* Plocal);
+vector<gsstype>* get_missing_col(CSR* Alocal, CSR* Plocal);
 
 /**
  * @brief Computes the rows to receive from other processes.
@@ -63,7 +93,7 @@ vector<int>* get_missing_col(CSR* Alocal, CSR* Plocal);
  * @param Plocal Pointer to the local information of the sparse matrix.
  * @param _bitcol Pointer to the vector containing missing column indices.
  */
-void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<int>* _bitcol);
+void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<gsstype>* _bitcol);
 
 // CSR* nsparseMGPU_noCommu(handles* h, CSR* Alocal, CSR* Plocal);
 
@@ -83,7 +113,7 @@ void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<int>* _bitcol);
  * @param used_by_solver A boolean indicating if the result is used by a solver.
  * @return CSR* Pointer to the resulting sparse matrix after multiplication.
  */
-CSR* nsparseMGPU_noCommu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_solver = true);
+CSR* nsparseMGPU_noCommu_new(handles* h, CSR* Alocal, CSR* Plocal /*, bool used_by_solver = true*/);
 
 /**
  * @brief Main function for sparse matrix multiplication with communication.
@@ -97,7 +127,7 @@ CSR* nsparseMGPU_noCommu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_
  * @param used_by_solver A boolean indicating if the result is used by a solver.
  * @return CSR* Pointer to the resulting sparse matrix after multiplication.
  */
-CSR* nsparseMGPU_commu_new(handles* h, CSR* Alocal, CSR* Plocal, bool used_by_solver = true);
+CSR* nsparseMGPU_commu_new(handles* h, CSR* Alocal, CSR* Plocal /*, bool used_by_solver = true*/);
 
 vector<int>* get_dev_missing_col(CSR* Alocal, CSR* Plocal);
 

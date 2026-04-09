@@ -8,7 +8,7 @@
 /**
  * @brief Determines which process owns a given element using binary search.
  *
- * This function searches for the process that should handle a given element `val` 
+ * This function searches for the process that should handle a given element `val`
  * by performing a binary search on the partition boundaries stored in `arr`.
  *
  * @param arr Array containing the partition boundaries for each process.
@@ -21,7 +21,7 @@ int bswhichprocess(gsstype* arr, int len, gsstype val);
 /**
  * @brief Determines which process owns a given element using binary search.
  *
- * This function searches for the process that should handle a given element `val` 
+ * This function searches for the process that should handle a given element `val`
  * by performing a binary search on the partition boundaries stored in `arr`.
  *
  * @param arr Array containing the partition boundaries for each process.

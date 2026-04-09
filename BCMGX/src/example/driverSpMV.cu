@@ -4,7 +4,7 @@
 #include "datastruct/vector.h"
 #include "generator/laplacian.h"
 #include "utility/assignDeviceToProcess.h"
-#include "utility/distribuite.h"
+#include "utility/distribute.h"
 #include "utility/globals.h"
 #include "utility/memory.h"
 #include "utility/mpi.h"
@@ -19,7 +19,7 @@
 #include <string>
 #include <unistd.h>
 
-using namespace std;
+// using namespace std;
 
 #define USAGE                                                                                                                                                   \
     "Usage: %s [--matrix <FILE_NAME> | --laplacian <SIZE> | --laplacian-3d <FILE_NAME>] [--time]\n\n"              \
@@ -28,10 +28,12 @@ using namespace std;
     "\t-l, --laplacian-3d <FILE_NAME>              Read generation parameters from file <FILE_NAME>.\n"                                                         \
     "\t-g, --laplacian-3d-generator [ 7p | 27p ]   Choose laplacian 3d generator (7 points or 27 points).\n"                                                    \
     "\t-a, --laplacian <SIZE>                      Generate a matrix whose size is <SIZE>^3.\n"                                                                 \
-    "\t-t, --time                                  Output the execution time of the application\n\n"
+    "\t-w, --warmup <N>                            Run <N> iteration before sampling time.\n"                                                                         \
+    "\t-n, --ntimes <N>                            Repeat <N> times the kernel.\n"                                                                                    \
+    "\t-t, --time                                  Output statistics (execution time, memory usage) of the application\n\n"
 
-extern vtype* d_temp_storage_max_min;
-extern vtype* min_max;
+// extern vtype* d_temp_storage_max_min;
+// extern vtype* min_max;
 
 enum generator_t {
     LAP_7P,
@@ -101,8 +103,7 @@ CSR* generate_lap3d_local_matrix(generator_t generator, const char* lap_3d_file)
         R = 5 };
     int* parms = read_laplacian_file(lap_3d_file);
     if (nprocs != (parms[P] * parms[Q] * parms[R])) {
-        fprintf(stderr, "Nproc must be equal to P*Q*R\n");
-        exit(EXIT_FAILURE);
+        DIE("Nproc must be equal to P*Q*R\n");
     }
     CSR* Alocal_host = Alocal_host = NULL;
     switch (generator) {
@@ -115,8 +116,7 @@ CSR* generate_lap3d_local_matrix(generator_t generator, const char* lap_3d_file)
         Alocal_host = generateLocalLaplacian3D_27p(parms[nx], parms[ny], parms[nz], parms[P], parms[Q], parms[R]);
         break;
     default:
-        printf("Invalid generator\n");
-        exit(1);
+        DIE("Invalid generator\n");
     }
     snprintf(idstring, sizeof(idstring), "%dx%dx%d", parms[P], parms[Q], parms[R]);
     FREE(parms);
@@ -139,6 +139,8 @@ int main(int argc, char** argv)
     signed char ch;
     itype n = 0;
     int time = 0;
+    int nwarmup = 0;
+    int ntimes = 1;
     generator_t generator = LAP_27P;
 
     static struct option long_options[] = {
@@ -147,11 +149,13 @@ int main(int argc, char** argv)
         { "laplacian-3d-generator", required_argument, NULL, 'g' },
         { "laplacian", required_argument, NULL, 'a' },
         { "time", no_argument, NULL, 't' },
+        { "warmup", required_argument, NULL, 'w'},
+        { "ntimes", required_argument, NULL, 'n'},        
         { "help", no_argument, NULL, 'h' },
         { NULL, 0, NULL, 0 }
     };
 
-    while ((ch = getopt_long(argc, argv, "m:l:g:a:ht", long_options, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "m:l:g:a:w:n:ht", long_options, NULL)) != -1) {
         switch (ch) {
         case 't':
             time = 1;
@@ -171,15 +175,19 @@ int main(int argc, char** argv)
             n = atoi(optarg);
             opt = LAP;
             break;
+        case 'n':
+            ntimes = atoi(optarg);
+            break;
+        case 'w':
+            nwarmup = atoi(optarg);
+            break;
         case 'h':
         default:
-            printf(USAGE, argv[0]);
-            exit(EXIT_FAILURE);
+            DIE(USAGE, argv[0]);
         }
     }
     if (opt == NONE) {
-        printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        DIE(USAGE, argv[0]);
     }
 
     int myid, nprocs, device_id;
@@ -215,6 +223,22 @@ int main(int argc, char** argv)
     Alocal->halo = halo;
     shrink_col(Alocal, NULL);
 
+    // vector<vtype>* res = Vector::init<vtype>(Alocal->n, true, true);
+    vector<vtype>* res=NULL;
+    size_t free_byte ;
+    size_t total_byte ;
+
+    if (ISMASTER) {
+	fprintf(stderr, "Repeat for %d iterations (with %d warmup).\n",ntimes,nwarmup);
+    }
+    // *********************
+    // Warmup
+    // *********************
+    for (int g=0; g<nwarmup; g++) { 
+	res = CSRm::CSRVector_product_adaptive_miniwarp_witho(Alocal, rhs, res, 1., 0.);
+	cudaDeviceSynchronize();
+    }
+
     // *********************
     // TIME
     // *********************
@@ -223,23 +247,49 @@ int main(int argc, char** argv)
         TOT_TIMEM = MPI_Wtime();
     }
 
-    vector<vtype>* res = CSRm::CSRVector_product_adaptive_miniwarp_witho(Alocal, rhs, NULL, 1., 0.);
-    cudaDeviceSynchronize();
+    // *********************
+    // Main Loop
+    // *********************
+    for (int g=0; g<ntimes; g++) { 
+	res = CSRm::CSRVector_product_adaptive_miniwarp_witho(Alocal, rhs, res, 1., 0.);
+	cudaDeviceSynchronize();
+    }
 
+    if (time == 1 && ISMASTER) {
+        TOT_TIMEM = (MPI_Wtime() - TOT_TIMEM);
+    }
+
+    cudaError_t cuda_status = cudaMemGetInfo( &free_byte, &total_byte ) ;
+    if ( cudaSuccess != cuda_status ){
+	    DIE("Error: cudaMemGetInfo fails, %s \n", cudaGetErrorString(cuda_status) );
+    }
+    
     // *********************
     // TIME
     // *********************
     if (time == 1 && ISMASTER) {
-        printf("TOTAL_TIME: %f\n", (MPI_Wtime() - TOT_TIMEM));
+        const double GIGABYTES = (double)1024*1024*1024;
+        printf("TIME per iteration: %lf\n", TOT_TIMEM/ntimes);
+        printf("GPU memory usage: %5.2f GB\n", (total_byte-free_byte)/GIGABYTES);
+#if 1
+	char fname[32];
+	sprintf(fname,"dump.%d",getpid());
+	FILE *fout=fopen(fname,"w");
+	assert(fout!=NULL);
+	Vector::print(res,-1,fout);
+	fclose(fout);
+#endif
     }
+
+
     CSRm::free(Alocal);
     Vector::free(rhs);
     Vector::free(res);
 
     CUDA_FREE(xvalstat);
     
-    CUDA_FREE(d_temp_storage_max_min);
-    CUDA_FREE(min_max);
+    // CUDA_FREE(d_temp_storage_max_min);
+    // CUDA_FREE(min_max);
 
     MPI_Finalize();
     return 0;

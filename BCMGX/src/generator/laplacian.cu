@@ -11,6 +11,27 @@
 #define MAX_NNZ_PER_ROW_LAP 5
 #define LAP_N_PARAMS 6
 
+#if 0
+#define CHECKED_ASSIGNMENT(left, right)                              \
+    {                                                                \
+        long int tmplong = right;                                    \
+        if (labs(tmplong) > INT_MAX) {                               \
+            DIE("Invalid column index: %ld\n", tmplong);             \
+        } else {                                                     \
+            left = tmplong;                                          \
+        }                                                            \
+    }
+#else
+// #define PRINT_COO3D
+#define CHECKED_ASSIGNMENT(left, right) \
+    left = (right);                     \
+    // if((Acol8[nz_count] + (ilower + 1L))>11943936000L) { \
+		// 	     fprintf(stderr,"Unexpected col(%d): %ld %ld %ld %d %d\n",nz_count,Acol8[i] + (ilower + 1L),Acol8[nz_count],ilower,nz_count,nnz); \
+	  	//              fprintf(stderr,"Line(%d), Acol8=%ld (%ld), %d %d %d %d %d %d %d %d %d %ld %ld\n",__LINE__,Acol8[nz_count],Acol8[nz_count]+ilower+1L,gi,gj,gk,nx,ny,nz,P,Q,R,ilower); \
+        // 	goto abcd; \
+        // }
+#endif
+
 long int internal_index(int gi, int gj, int gk, int nx, int ny, int nz, int P, int Q, int R)
 {
     gstype i = gi % nx; // Position in x
@@ -101,7 +122,7 @@ CSR* generateLocalLaplacian3D(itype n)
         // set row index
         Alocal->row[I + 1] = Alocal->row[I] + nnz;
         for (itype j = 0; j < nnz; j++) {
-            Alocal->col[NNZ] = cols[j];
+            Alocal->col8[NNZ] = cols[j];
             Alocal->val[NNZ] = values[j];
             NNZ++;
         }
@@ -208,7 +229,7 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
 
     // alloc COO
     itype* Arow = MALLOC(itype, local_size * 7, true);
-    itype* Acol = MALLOC(itype, local_size * 7, true);
+    gsstype* Acol8 = MALLOC(gsstype, local_size * 7, true);
     vtype* Aval = MALLOC(vtype, local_size * 7, true);
 
     itype count = 0;
@@ -227,7 +248,7 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
 
                 // Diagonal term
                 Arow[nz_count] = count;
-                Acol[nz_count] = count + (ilower - ilower);
+                Acol8[nz_count] = count + (ilower - ilower);
                 Aval[nz_count] = 6.;
                 nnz++;
                 nz_count++;
@@ -238,7 +259,8 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
                     // do nothing
                 } else {
                     Arow[nz_count] = count;
-                    Acol[nz_count] = internal_index(gi - 1, gj, gk, nx, ny, nz, P, Q, R) - ilower;
+                    // Acol8[nz_count] = internal_index(gi - 1, gj, gk, nx, ny, nz, P, Q, R) - ilower;
+                    CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi - 1, gj, gk, nx, ny, nz, P, Q, R) - ilower);
                     Aval[nz_count] = -1.;
                     nnz++;
                     nz_count++;
@@ -248,7 +270,7 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
                     // do nothing, no right neighbor
                 } else {
                     Arow[nz_count] = count;
-                    Acol[nz_count] = internal_index(gi + 1, gj, gk, nx, ny, nz, P, Q, R) - ilower;
+                    CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi + 1, gj, gk, nx, ny, nz, P, Q, R) - ilower);
                     Aval[nz_count] = -1.;
                     nnz++;
                     nz_count++;
@@ -258,7 +280,7 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
                     // do nothing, no right neighbor
                 } else {
                     Arow[nz_count] = count;
-                    Acol[nz_count] = internal_index(gi, gj - 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                    CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi, gj - 1, gk, nx, ny, nz, P, Q, R) - ilower);
                     Aval[nz_count] = -1.;
                     nnz++;
                     nz_count++;
@@ -268,7 +290,7 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
                     // do nothing, no right neighbor
                 } else {
                     Arow[nz_count] = count;
-                    Acol[nz_count] = internal_index(gi, gj + 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                    CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi, gj + 1, gk, nx, ny, nz, P, Q, R) - ilower);
                     Aval[nz_count] = -1.;
                     nnz++;
                     nz_count++;
@@ -278,7 +300,7 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
                     // do nothing, no right neighbor
                 } else {
                     Arow[nz_count] = count;
-                    Acol[nz_count] = internal_index(gi, gj, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                    CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi, gj, gk - 1, nx, ny, nz, P, Q, R) - ilower);
                     Aval[nz_count] = -1.;
                     nnz++;
                     nz_count++;
@@ -288,14 +310,14 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
                     // do nothing, no right neighbor
                 } else {
                     Arow[nz_count] = count;
-                    Acol[nz_count] = internal_index(gi, gj, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                    CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi, gj, gk + 1, nx, ny, nz, P, Q, R) - ilower);
                     Aval[nz_count] = -1.;
                     nnz++;
                     nz_count++;
                 }
 
                 Alocal->row[count + 1] = Alocal->row[count] + nnz;
-                bubbleSort(&Acol[nz_count - nnz], &Aval[nz_count - nnz], nnz);
+                bubbleSort(&Acol8[nz_count - nnz], &Aval[nz_count - nnz], nnz);
                 nnz = 0;
                 count++;
             }
@@ -306,7 +328,8 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
 
     Alocal->row[count] = nz_count; // check if
     for (itype j = 0; j < nz_count; j++) {
-        Alocal->col[j] = Acol[j];
+        Alocal->col8[j] = Acol8[j];
+        Alocal->col[j] = (labs(Acol8[j]) < INT_MAX) ? Acol8[j] : INT_MAX;
         Alocal->val[j] = Aval[j];
     }
     Alocal->nnz = nz_count;
@@ -317,17 +340,15 @@ CSR* generateLocalLaplacian3D_7p(itype nx, itype ny, itype nz, itype P, itype Q,
     snprintf(fname, 256, "matrix-rank%d-pqr-%d-%d-%d.mtx", myid, p, q, r);
     fout = fopen(fname, "w+");
     if (fout == NULL) {
-        fprintf(stderr, "in function %s: error opening %s\n", __func__, fname);
-        exit(EXIT_FAILURE);
+        DIE("in function %s: error opening %s\n", __func__, fname);
     }
     for (int i = 0; i < nz_count; i++) {
-        fprintf(fout, "%d %d %lf\n", Arow[i] + (ilower + 1), Acol[i] + ilower + 1, Aval[i]);
+        fprintf(fout, "%d %d %lf\n", Arow[i] + (ilower + 1), Acol8[i] + ilower + 1, Aval[i]);
     }
     fclose(fout);
 #endif
-
     FREE(Arow);
-    FREE(Acol);
+    FREE(Acol8);
     FREE(Aval);
 
     return Alocal;
@@ -405,6 +426,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
         itaskmap[i] = (allcoords[i * 3 + 2] * Q * P) + (allcoords[i * 3 + 1] * P) + (allcoords[i * 3]);
     }
 
+    // if(myid==nprocs-1) {
+
     // if(myid==0) {
     //   for(int i=0; i<nprocs; i++) {
     // 	   printf("taskmap[%d]=%d, itaskmap[%d]=%d\n",i,taskmap[i],i,itaskmap[i]);
@@ -425,7 +448,7 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
 
     // alloc COO
     itype* Arow = MALLOC(itype, local_size * 27, true);
-    itype* Acol = MALLOC(itype, local_size * 27, true);
+    gsstype* Acol8 = MALLOC(gsstype, local_size * 27, true);
     vtype* Aval = MALLOC(vtype, local_size * 27, true);
 
     itype count = 0;
@@ -444,7 +467,7 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
 
                 // Diagonal term
                 Arow[nz_count] = count;
-                Acol[nz_count] = count;
+                Acol8[nz_count] = count;
                 Aval[nz_count] = 26.;
                 nnz++;
                 nz_count++;
@@ -456,7 +479,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                     // do nothing
                 } else {
                     Arow[nz_count] = count;
-                    Acol[nz_count] = internal_index(gi - 1, gj, gk, nx, ny, nz, P, Q, R) - ilower;
+                    // Acol8[nz_count] = internal_index(gi - 1, gj, gk, nx, ny, nz, P, Q, R) - ilower;
+                    CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi - 1, gj, gk, nx, ny, nz, P, Q, R) - ilower);
                     Aval[nz_count] = -1.;
                     nnz++;
                     nz_count++;
@@ -467,7 +491,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                     // do nothing, no right neighbor
                 } else {
                     Arow[nz_count] = count;
-                    Acol[nz_count] = internal_index(gi + 1, gj, gk, nx, ny, nz, P, Q, R) - ilower;
+                    // Acol8[nz_count] = internal_index(gi + 1, gj, gk, nx, ny, nz, P, Q, R) - ilower;
+                    CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi + 1, gj, gk, nx, ny, nz, P, Q, R) - ilower);
                     Aval[nz_count] = -1.;
                     nnz++;
                     nz_count++;
@@ -478,7 +503,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                     // do nothing, no right neighbor
                 } else {
                     Arow[nz_count] = count;
-                    Acol[nz_count] = internal_index(gi, gj - 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                    // Acol8[nz_count] = internal_index(gi, gj - 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                    CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi, gj - 1, gk, nx, ny, nz, P, Q, R) - ilower);
                     Aval[nz_count] = -1.;
                     nnz++;
                     nz_count++;
@@ -488,7 +514,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                         // do nothing
                     } else {
                         Arow[nz_count] = count;
-                        Acol[nz_count] = internal_index(gi - 1, gj - 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                        // Acol8[nz_count] = internal_index(gi - 1, gj - 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                        CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi - 1, gj - 1, gk, nx, ny, nz, P, Q, R) - ilower);
                         Aval[nz_count] = -1.;
                         nnz++;
                         nz_count++;
@@ -499,7 +526,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                         // do nothing, no right neighbor
                     } else {
                         Arow[nz_count] = count;
-                        Acol[nz_count] = internal_index(gi + 1, gj - 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                        // Acol8[nz_count] = internal_index(gi + 1, gj - 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                        CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi + 1, gj - 1, gk, nx, ny, nz, P, Q, R) - ilower);
                         Aval[nz_count] = -1.;
                         nnz++;
                         nz_count++;
@@ -511,7 +539,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                     // do nothing, no right neighbor
                 } else {
                     Arow[nz_count] = count;
-                    Acol[nz_count] = internal_index(gi, gj + 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                    // Acol8[nz_count] = internal_index(gi, gj + 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                    CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi, gj + 1, gk, nx, ny, nz, P, Q, R) - ilower);
                     Aval[nz_count] = -1.;
                     nnz++;
                     nz_count++;
@@ -521,7 +550,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                         // do nothing
                     } else {
                         Arow[nz_count] = count;
-                        Acol[nz_count] = internal_index(gi - 1, gj + 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                        // Acol8[nz_count] = internal_index(gi - 1, gj + 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                        CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi - 1, gj + 1, gk, nx, ny, nz, P, Q, R) - ilower);
                         Aval[nz_count] = -1.;
                         nnz++;
                         nz_count++;
@@ -532,7 +562,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                         // do nothing, no right neighbor
                     } else {
                         Arow[nz_count] = count;
-                        Acol[nz_count] = internal_index(gi + 1, gj + 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                        // Acol8[nz_count] = internal_index(gi + 1, gj + 1, gk, nx, ny, nz, P, Q, R) - ilower;
+                        CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi + 1, gj + 1, gk, nx, ny, nz, P, Q, R) - ilower);
                         Aval[nz_count] = -1.;
                         nnz++;
                         nz_count++;
@@ -544,7 +575,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                     // do nothing, no right neighbor
                 } else {
                     Arow[nz_count] = count;
-                    Acol[nz_count] = internal_index(gi, gj, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                    // Acol8[nz_count] = internal_index(gi, gj, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                    CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi, gj, gk - 1, nx, ny, nz, P, Q, R) - ilower);
                     Aval[nz_count] = -1.;
                     nnz++;
                     nz_count++;
@@ -554,7 +586,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                         // do nothing
                     } else {
                         Arow[nz_count] = count;
-                        Acol[nz_count] = internal_index(gi - 1, gj, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                        // Acol8[nz_count] = internal_index(gi - 1, gj, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                        CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi - 1, gj, gk - 1, nx, ny, nz, P, Q, R) - ilower);
                         Aval[nz_count] = -1.;
                         nnz++;
                         nz_count++;
@@ -565,7 +598,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                         // do nothing, no right neighbor
                     } else {
                         Arow[nz_count] = count;
-                        Acol[nz_count] = internal_index(gi + 1, gj, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                        // Acol8[nz_count] = internal_index(gi + 1, gj, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                        CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi + 1, gj, gk - 1, nx, ny, nz, P, Q, R) - ilower);
                         Aval[nz_count] = -1.;
                         nnz++;
                         nz_count++;
@@ -576,7 +610,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                         // do nothing
                     } else {
                         Arow[nz_count] = count;
-                        Acol[nz_count] = internal_index(gi, gj - 1, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                        // Acol8[nz_count] = internal_index(gi, gj - 1, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                        CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi, gj - 1, gk - 1, nx, ny, nz, P, Q, R) - ilower);
                         Aval[nz_count] = -1.;
                         nnz++;
                         nz_count++;
@@ -586,7 +621,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                             // do nothing
                         } else {
                             Arow[nz_count] = count;
-                            Acol[nz_count] = internal_index(gi - 1, gj - 1, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                            // Acol8[nz_count] = internal_index(gi - 1, gj - 1, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                            CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi - 1, gj - 1, gk - 1, nx, ny, nz, P, Q, R) - ilower);
                             Aval[nz_count] = -1.;
                             nnz++;
                             nz_count++;
@@ -597,7 +633,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                             // do nothing
                         } else {
                             Arow[nz_count] = count;
-                            Acol[nz_count] = internal_index(gi + 1, gj - 1, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                            // Acol8[nz_count] = internal_index(gi + 1, gj - 1, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                            CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi + 1, gj - 1, gk - 1, nx, ny, nz, P, Q, R) - ilower);
                             Aval[nz_count] = -1.;
                             nnz++;
                             nz_count++;
@@ -609,7 +646,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                         // do nothing, no right neighbor
                     } else {
                         Arow[nz_count] = count;
-                        Acol[nz_count] = internal_index(gi, gj + 1, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                        // Acol8[nz_count] = internal_index(gi, gj + 1, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                        CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi, gj + 1, gk - 1, nx, ny, nz, P, Q, R) - ilower);
                         Aval[nz_count] = -1.;
                         nnz++;
                         nz_count++;
@@ -619,7 +657,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                             // do nothing
                         } else {
                             Arow[nz_count] = count;
-                            Acol[nz_count] = internal_index(gi - 1, gj + 1, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                            // Acol8[nz_count] = internal_index(gi - 1, gj + 1, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                            CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi - 1, gj + 1, gk - 1, nx, ny, nz, P, Q, R) - ilower);
                             Aval[nz_count] = -1.;
                             nnz++;
                             nz_count++;
@@ -630,7 +669,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                             // do nothing
                         } else {
                             Arow[nz_count] = count;
-                            Acol[nz_count] = internal_index(gi + 1, gj + 1, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                            // Acol8[nz_count] = internal_index(gi + 1, gj + 1, gk - 1, nx, ny, nz, P, Q, R) - ilower;
+                            CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi + 1, gj + 1, gk - 1, nx, ny, nz, P, Q, R) - ilower);
                             Aval[nz_count] = -1.;
                             nnz++;
                             nz_count++;
@@ -643,7 +683,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                     // do nothing, no right neighbor
                 } else {
                     Arow[nz_count] = count;
-                    Acol[nz_count] = internal_index(gi, gj, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                    // Acol8[nz_count] = internal_index(gi, gj, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                    CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi, gj, gk + 1, nx, ny, nz, P, Q, R) - ilower);
                     Aval[nz_count] = -1.;
                     nnz++;
                     nz_count++;
@@ -653,7 +694,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                         // do nothing
                     } else {
                         Arow[nz_count] = count;
-                        Acol[nz_count] = internal_index(gi - 1, gj, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                        // Acol8[nz_count] = internal_index(gi - 1, gj, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                        CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi - 1, gj, gk + 1, nx, ny, nz, P, Q, R) - ilower);
                         Aval[nz_count] = -1.;
                         nnz++;
                         nz_count++;
@@ -664,7 +706,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                         // do nothing, no right neighbor
                     } else {
                         Arow[nz_count] = count;
-                        Acol[nz_count] = internal_index(gi + 1, gj, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                        // Acol8[nz_count] = internal_index(gi + 1, gj, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                        CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi + 1, gj, gk + 1, nx, ny, nz, P, Q, R) - ilower);
                         Aval[nz_count] = -1.;
                         nnz++;
                         nz_count++;
@@ -675,7 +718,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                         // do nothing
                     } else {
                         Arow[nz_count] = count;
-                        Acol[nz_count] = internal_index(gi, gj - 1, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                        // Acol8[nz_count] = internal_index(gi, gj - 1, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                        CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi, gj - 1, gk + 1, nx, ny, nz, P, Q, R) - ilower);
                         Aval[nz_count] = -1.;
                         nnz++;
                         nz_count++;
@@ -685,7 +729,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                             // do nothing
                         } else {
                             Arow[nz_count] = count;
-                            Acol[nz_count] = internal_index(gi - 1, gj - 1, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                            // Acol8[nz_count] = internal_index(gi - 1, gj - 1, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                            CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi - 1, gj - 1, gk + 1, nx, ny, nz, P, Q, R) - ilower);
                             Aval[nz_count] = -1.;
                             nnz++;
                             nz_count++;
@@ -696,7 +741,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                             // do nothing
                         } else {
                             Arow[nz_count] = count;
-                            Acol[nz_count] = internal_index(gi + 1, gj - 1, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                            // Acol8[nz_count] = internal_index(gi + 1, gj - 1, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                            CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi + 1, gj - 1, gk + 1, nx, ny, nz, P, Q, R) - ilower);
                             Aval[nz_count] = -1.;
                             nnz++;
                             nz_count++;
@@ -708,7 +754,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                         // do nothing, no right neighbor
                     } else {
                         Arow[nz_count] = count;
-                        Acol[nz_count] = internal_index(gi, gj + 1, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                        // Acol8[nz_count] = internal_index(gi, gj + 1, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                        CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi, gj + 1, gk + 1, nx, ny, nz, P, Q, R) - ilower);
                         Aval[nz_count] = -1.;
                         nnz++;
                         nz_count++;
@@ -718,7 +765,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                             // do nothing
                         } else {
                             Arow[nz_count] = count;
-                            Acol[nz_count] = internal_index(gi - 1, gj + 1, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                            // Acol8[nz_count] = internal_index(gi - 1, gj + 1, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                            CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi - 1, gj + 1, gk + 1, nx, ny, nz, P, Q, R) - ilower);
                             Aval[nz_count] = -1.;
                             nnz++;
                             nz_count++;
@@ -729,7 +777,8 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                             // do nothing
                         } else {
                             Arow[nz_count] = count;
-                            Acol[nz_count] = internal_index(gi + 1, gj + 1, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                            // Acol8[nz_count] = internal_index(gi + 1, gj + 1, gk + 1, nx, ny, nz, P, Q, R) - ilower;
+                            CHECKED_ASSIGNMENT(Acol8[nz_count], internal_index(gi + 1, gj + 1, gk + 1, nx, ny, nz, P, Q, R) - ilower);
                             Aval[nz_count] = -1.;
                             nnz++;
                             nz_count++;
@@ -738,7 +787,7 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
                 }
 
                 Alocal->row[count + 1] = Alocal->row[count] + nnz;
-                bubbleSort(&Acol[nz_count - nnz], &Aval[nz_count - nnz], nnz);
+                bubbleSort(&Acol8[nz_count - nnz], &Aval[nz_count - nnz], nnz);
                 nnz = 0;
                 count++;
             }
@@ -749,227 +798,237 @@ CSR* generateLocalLaplacian3D_27p(itype nx, itype ny, itype nz, itype P, itype Q
 
     Alocal->row[count] = nz_count; // check if
     for (itype j = 0; j < nz_count; j++) {
-        Alocal->col[j] = Acol[j];
+        Alocal->col8[j] = Acol8[j];
+        // Alocal->col[j] = Acol8[j];
+        Alocal->col[j] = (labs(Acol8[j]) < INT_MAX) ? Acol8[j] : INT_MAX;
         Alocal->val[j] = Aval[j];
     }
     Alocal->nnz = nz_count;
-
-#if defined(PRINT_COO3D)
-    FILE* fout = NULL;
-    char fname[256];
-    snprintf(fname, 256, "matrix-rank%d-pqr-%d-%d-%d.mtx", myid, p, q, r);
-    fout = fopen(fname, "w+");
-    if (fout == NULL) {
-        fprintf(stderr, "in function %s: error opening %s\n", __func__, fname);
-        exit(EXIT_FAILURE);
-    }
-    for (int i = 0; i < nz_count; i++) {
-        fprintf(fout, "%d %d %lf\n", Arow[i] + (ilower + 1), Acol[i] + ilower + 1, Aval[i]);
-    }
-    fclose(fout);
-#endif
+    // abcd:
+    // #if defined(PRINT_COO3D) || 1
+    //     FILE* fout = NULL;
+    //     char fname[256];
+    //     snprintf(fname, 256, "matrix-rank%d-pqr-%d-%d-%d.mtx", myid, p, q, r);
+    //     fout = fopen(fname, "w+");
+    //     if (fout == NULL) {
+    //         DIE("in function %s: error opening %s\n", __func__, fname);
+    //     }
+    //     for (int i = 0; i < nz_count; i++) {
+    //         fprintf(fout, "%ld %ld %ld %lf\n", Arow[i] + (ilower + 1L), Acol8[i] + (ilower + 1L), Acol8[i], Aval[i]);
+    // 		if((Acol8[i] + (ilower + 1L))>11943936000L) {
+    // 			     fprintf(stderr,"Unexpected col(%d): %ld %ld %ld\n",i,Acol8[i] + (ilower + 1L),Acol8[i],ilower);
+    // 			     break;
+    // 		}
+    //     }
+    //     fclose(fout);
+    // #endif
 
     FREE(Arow);
-    FREE(Acol);
+    FREE(Acol8);
     FREE(Aval);
 
+    MPI_Barrier(MPI_COMM_WORLD);
     return Alocal;
-}
-
-CSR* generateLocalLaplacian3D_27p_old(itype nx, itype ny, itype nz, itype P, itype Q, itype R)
-{
-    itype local_size = nx * ny * nz;
-
-    gstype gnx = (gstype)nx * (gstype)P; // Boundary on x side
-    gstype gny = (gstype)ny * (gstype)Q; // Boundary on y side
-    gstype gnz = (gstype)nz * (gstype)R; // Boundary on z side
-
-    gstype num_rows = gnx * gny * gnz; // global number of rows
-    gstype num_nonzeros = num_rows * 27; // Ignoring any boundary, 27 nnz per row
-    gstype num_substract = 0;
-
-    num_substract += gny * gnz;
-    num_substract += gny * gnz;
-    num_substract += gnx * gnz;
-    num_substract += gnx * gnz;
-    num_substract += gnx * gny;
-    num_substract += gnx * gny;
-
-    num_nonzeros -= num_substract; // global
-
-    // ---------------------------------------------------------------------------
-
-    _MPI_ENV;
-    MPI_Comm NEWCOMM;
-
-    int dims[3] = { 0, 0, 0 };
-    int periods[3] = { false, false, false };
-    int coords[3] = { 0, 0, 0 };
-    int my3id;
-
-    dims[0] = P;
-    dims[1] = Q;
-    dims[2] = R;
-
-    MPI_Dims_create(nprocs, 3, dims);
-    MPI_Cart_create(MPI_COMM_WORLD, 3, dims, periods, false, &NEWCOMM);
-    MPI_Comm_rank(NEWCOMM, &my3id);
-    MPI_Cart_coords(NEWCOMM, my3id, 3, coords);
-
-    // ---------------------------------------------------------------------------
-
-    int p = coords[0];
-    int q = coords[1];
-    int r = coords[2];
-
-    gstype ilower = (((gstype)r) * ((gstype)Q) * ((gstype)P)
-                        + ((gstype)q) * ((gstype)P)
-                        + ((gstype)p))
-        * ((gstype)local_size);
-
-    // ---------------------------------------------------------------------------
-
-    int allcoords[3 * P * Q * R] = { 0 };
-
-    taskmap = MALLOC(int, nprocs);
-    itaskmap = MALLOC(int, nprocs);
-
-    CHECK_MPI(MPI_Allgather(
-        coords,
-        sizeof(coords),
-        MPI_BYTE,
-        allcoords,
-        sizeof(coords),
-        MPI_BYTE,
-        MPI_COMM_WORLD));
-
-    for (int i = 0; i < nprocs; i++) {
-        taskmap[(allcoords[i * 3 + 2] * Q * P) + (allcoords[i * 3 + 1] * P) + (allcoords[i * 3])] = i;
-        itaskmap[i] = (allcoords[i * 3 + 2] * Q * P) + (allcoords[i * 3 + 1] * P) + (allcoords[i * 3]);
-    }
-
-    // if(myid==0) {
-    //   for(int i=0; i<nprocs; i++) {
-    // 	   printf("taskmap[%d]=%d, itaskmap[%d]=%d\n",i,taskmap[i],i,itaskmap[i]);
-    //   }
+    // } else {
+    //     MPI_Barrier(MPI_COMM_WORLD);
+    // 	return NULL;
     // }
-
-    // ---------------------------------------------------------------------------
-
-    if (log_file) {
-        fprintf(log_file, "myid: %d\n", my3id);
-        fprintf(log_file, "num_rows: %ld\n", num_rows);
-        fprintf(log_file, "ilower: %ld\n", ilower);
-        fprintf(log_file, "local_size: %d\n", local_size);
-        fprintf(log_file, "p: %d, q: %d, r: %d\n", p, q, r);
-    }
-
-    CSR* Alocal = CSRm::init(
-        local_size, // rows
-        num_rows, // cols
-        (local_size * 27), // nnz
-        true, // allocate mem
-        false, // on device
-        false, // symetric
-        num_rows, // full_n
-        ilower // row_shift
-    );
-
-    // alloc COO
-    itype* Arow = MALLOC(itype, local_size * 27, true);
-    itype* Acol = MALLOC(itype, local_size * 27, true);
-    vtype* Aval = MALLOC(vtype, local_size * 27, true);
-
-    itype count = 0;
-    itype nz_count = 0;
-    itype nnz = 0;
-    Alocal->row[0] = 0;
-
-    // ---------------------------------------------------------------------------
-
-    for (int k = 0; k < nz; k++) {
-        int gk = r * nz + k;
-        for (int j = 0; j < ny; j++) {
-            int gj = q * ny + j;
-            for (int i = 0; i < nx; i++) {
-                int gi = p * nx + i;
-
-                // Current global row
-                gstype curgrow = gk * gny * gnx
-                    + gj * gnx
-                    + gi;
-
-                // Current local row
-                // gstype curlrow = k * nx * ny
-                //         + j * nx + i;
-
-                for (int sz = -1; sz <= 1; sz++) {
-                    if (gk + sz >= 0 && gk + sz < gnz) {
-                        for (int sy = -1; sy <= 1; sy++) {
-                            if (gj + sy >= 0 && gj + sy < gny) {
-                                for (int sx = -1; sx <= 1; sx++) {
-                                    if (gi + sx >= 0 && gi + sx < gnx) {
-                                        gstype curcol = curgrow
-                                            + sz * gnx * gny
-                                            + sy * gnx
-                                            + sx;
-
-                                        if (curcol == curgrow) {
-                                            Aval[nz_count] = 26.0;
-                                        } else {
-                                            Aval[nz_count] = -1.0;
-                                        }
-
-                                        Arow[nz_count] = count;
-                                        Acol[nz_count] = curcol - ilower;
-
-                                        nnz++;
-                                        nz_count++;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Alocal->row[count + 1] = Alocal->row[count] + nnz;
-                bubbleSort(&Acol[nz_count - nnz], &Aval[nz_count - nnz], nnz);
-                nnz = 0;
-                count++;
-            }
-        }
-    }
-
-    // ---------------------------------------------------------------------------
-
-    Alocal->row[count] = nz_count; // check if
-    for (itype j = 0; j < nz_count; j++) {
-        Alocal->col[j] = Acol[j];
-        Alocal->val[j] = Aval[j];
-    }
-    Alocal->nnz = nz_count;
-
-#if defined(PRINT_COO3D)
-    FILE* fout = NULL;
-    char fname[256];
-    snprintf(fname, 256, "matrix-rank%d-pqr-%d-%d-%d.mtx", myid, p, q, r);
-    fout = fopen(fname, "w+");
-    if (fout == NULL) {
-        fprintf(stderr, "in function %s: error opening %s\n", __func__, fname);
-        exit(EXIT_FAILURE);
-    }
-    for (int i = 0; i < nz_count; i++) {
-        fprintf(fout, "%d %d %lf\n", Arow[i] + (ilower + 1), Acol[i] + ilower + 1, Aval[i]);
-    }
-    fclose(fout);
-#endif
-
-    FREE(Arow);
-    FREE(Acol);
-    FREE(Aval);
-
-    return Alocal;
 }
+
+// CSR* generateLocalLaplacian3D_27p_old(itype nx, itype ny, itype nz, itype P, itype Q, itype R)
+// {
+//     itype local_size = nx * ny * nz;
+
+//     gstype gnx = (gstype)nx * (gstype)P; // Boundary on x side
+//     gstype gny = (gstype)ny * (gstype)Q; // Boundary on y side
+//     gstype gnz = (gstype)nz * (gstype)R; // Boundary on z side
+
+//     gstype num_rows = gnx * gny * gnz; // global number of rows
+//     gstype num_nonzeros = num_rows * 27; // Ignoring any boundary, 27 nnz per row
+//     gstype num_substract = 0;
+
+//     num_substract += gny * gnz;
+//     num_substract += gny * gnz;
+//     num_substract += gnx * gnz;
+//     num_substract += gnx * gnz;
+//     num_substract += gnx * gny;
+//     num_substract += gnx * gny;
+
+//     num_nonzeros -= num_substract; // global
+
+//     // ---------------------------------------------------------------------------
+
+//     _MPI_ENV;
+//     MPI_Comm NEWCOMM;
+
+//     int dims[3] = { 0, 0, 0 };
+//     int periods[3] = { false, false, false };
+//     int coords[3] = { 0, 0, 0 };
+//     int my3id;
+
+//     dims[0] = P;
+//     dims[1] = Q;
+//     dims[2] = R;
+
+//     MPI_Dims_create(nprocs, 3, dims);
+//     MPI_Cart_create(MPI_COMM_WORLD, 3, dims, periods, false, &NEWCOMM);
+//     MPI_Comm_rank(NEWCOMM, &my3id);
+//     MPI_Cart_coords(NEWCOMM, my3id, 3, coords);
+
+//     // ---------------------------------------------------------------------------
+
+//     int p = coords[0];
+//     int q = coords[1];
+//     int r = coords[2];
+
+//     gstype ilower = (((gstype)r) * ((gstype)Q) * ((gstype)P)
+//                         + ((gstype)q) * ((gstype)P)
+//                         + ((gstype)p))
+//         * ((gstype)local_size);
+
+//     // ---------------------------------------------------------------------------
+
+//     int allcoords[3 * P * Q * R] = { 0 };
+
+//     taskmap = MALLOC(int, nprocs);
+//     itaskmap = MALLOC(int, nprocs);
+
+//     CHECK_MPI(MPI_Allgather(
+//         coords,
+//         sizeof(coords),
+//         MPI_BYTE,
+//         allcoords,
+//         sizeof(coords),
+//         MPI_BYTE,
+//         MPI_COMM_WORLD));
+
+//     for (int i = 0; i < nprocs; i++) {
+//         taskmap[(allcoords[i * 3 + 2] * Q * P) + (allcoords[i * 3 + 1] * P) + (allcoords[i * 3])] = i;
+//         itaskmap[i] = (allcoords[i * 3 + 2] * Q * P) + (allcoords[i * 3 + 1] * P) + (allcoords[i * 3]);
+//     }
+
+//     // if(myid==0) {
+//     //   for(int i=0; i<nprocs; i++) {
+//     // 	   printf("taskmap[%d]=%d, itaskmap[%d]=%d\n",i,taskmap[i],i,itaskmap[i]);
+//     //   }
+//     // }
+
+//     // ---------------------------------------------------------------------------
+
+//     if (log_file) {
+//         fprintf(log_file, "myid: %d\n", my3id);
+//         fprintf(log_file, "num_rows: %ld\n", num_rows);
+//         fprintf(log_file, "ilower: %ld\n", ilower);
+//         fprintf(log_file, "local_size: %d\n", local_size);
+//         fprintf(log_file, "p: %d, q: %d, r: %d\n", p, q, r);
+//     }
+
+//     CSR* Alocal = CSRm::init(
+//         local_size, // rows
+//         num_rows, // cols
+//         (local_size * 27), // nnz
+//         true, // allocate mem
+//         false, // on device
+//         false, // symetric
+//         num_rows, // full_n
+//         ilower // row_shift
+//     );
+
+//     // alloc COO
+//     itype* Arow = MALLOC(itype, local_size * 27, true);
+//     gsstype* Acol8 = MALLOC(gsstype, local_size * 27, true);
+//     vtype* Aval = MALLOC(vtype, local_size * 27, true);
+
+//     itype count = 0;
+//     itype nz_count = 0;
+//     itype nnz = 0;
+//     Alocal->row[0] = 0;
+
+//     // ---------------------------------------------------------------------------
+
+//     for (int k = 0; k < nz; k++) {
+//         int gk = r * nz + k;
+//         for (int j = 0; j < ny; j++) {
+//             int gj = q * ny + j;
+//             for (int i = 0; i < nx; i++) {
+//                 int gi = p * nx + i;
+
+//                 // Current global row
+//                 gstype curgrow = gk * gny * gnx
+//                     + gj * gnx
+//                     + gi;
+
+//                 // Current local row
+//                 // gstype curlrow = k * nx * ny
+//                 //         + j * nx + i;
+
+//                 for (int sz = -1; sz <= 1; sz++) {
+//                     if (gk + sz >= 0 && gk + sz < gnz) {
+//                         for (int sy = -1; sy <= 1; sy++) {
+//                             if (gj + sy >= 0 && gj + sy < gny) {
+//                                 for (int sx = -1; sx <= 1; sx++) {
+//                                     if (gi + sx >= 0 && gi + sx < gnx) {
+//                                         gstype curcol = curgrow
+//                                             + sz * gnx * gny
+//                                             + sy * gnx
+//                                             + sx;
+
+//                                         if (curcol == curgrow) {
+//                                             Aval[nz_count] = 26.0;
+//                                         } else {
+//                                             Aval[nz_count] = -1.0;
+//                                         }
+
+//                                         Arow[nz_count] = count;
+//                                         Acol8[nz_count] = curcol - ilower;
+
+//                                         nnz++;
+//                                         nz_count++;
+//                                     }
+//                                 }
+//                             }
+//                         }
+//                     }
+//                 }
+
+//                 Alocal->row[count + 1] = Alocal->row[count] + nnz;
+//                 bubbleSort(&Acol8[nz_count - nnz], &Aval[nz_count - nnz], nnz);
+//                 nnz = 0;
+//                 count++;
+//             }
+//         }
+//     }
+
+//     // ---------------------------------------------------------------------------
+
+//     Alocal->row[count] = nz_count; // check if
+//     for (itype j = 0; j < nz_count; j++) {
+//         Alocal->col8[j] = Acol8[j];
+//         Alocal->col[j] = Acol8[j];
+//         Alocal->val[j] = Aval[j];
+//     }
+//     Alocal->nnz = nz_count;
+
+// #if defined(PRINT_COO3D)
+//     FILE* fout = NULL;
+//     char fname[256];
+//     snprintf(fname, 256, "matrix-rank%d-pqr-%d-%d-%d.mtx", myid, p, q, r);
+//     fout = fopen(fname, "w+");
+//     if (fout == NULL) {
+//         DIE("in function %s: error opening %s\n", __func__, fname);
+//     }
+//     for (int i = 0; i < nz_count; i++) {
+//         fprintf(fout, "%d %d %lf\n", Arow[i] + (ilower + 1), Acol8[i] + ilower + 1, Aval[i]);
+//     }
+//     fclose(fout);
+// #endif
+
+//     FREE(Arow);
+//     FREE(Acol8);
+//     FREE(Aval);
+
+//     return Alocal;
+// }
 
 int* read_laplacian_file(const char* file_name)
 {
@@ -979,8 +1038,7 @@ int* read_laplacian_file(const char* file_name)
     int* lap_3d_parm = MALLOC(int, LAP_N_PARAMS, true);
     FILE* fp = fopen(file_name, "r");
     if (!fp) {
-        fprintf(stderr, "[ERROR] - Laplacia file not found! (%s)\n", file_name);
-        exit(EXIT_FAILURE);
+        DIE("[ERROR] - Laplacia file not found! (%s)\n", file_name);
     }
 
     while (fgets(buffer, BUFSIZE, fp)) { /* READ a LINE */
@@ -989,8 +1047,7 @@ int* read_laplacian_file(const char* file_name)
 
         // Check that the buffer is big enough to read a line
         if (buffer[buflen - 1] != '\n' && !feof(fp)) {
-            fprintf(stderr, "[ERROR] File %s. The line is too long, increase the BUFSIZE! Exit\n", file_name);
-            exit(EXIT_FAILURE);
+            DIE("[ERROR] File %s. The line is too long, increase the BUFSIZE! Exit\n", file_name);
         }
 
         // skip empty lines and comments
@@ -1000,8 +1057,7 @@ int* read_laplacian_file(const char* file_name)
 
             err = sscanf(buffer, "%s = %d\n", opt, &value);
             if (err != 2 || err == EOF) {
-                fprintf(stderr, "[ERROR] Error reading file %s.\n", file_name);
-                exit(EXIT_FAILURE);
+                DIE("[ERROR] Error reading file %s.\n", file_name);
             }
 
             for (int i = 0; i < LAP_N_PARAMS; i++) {

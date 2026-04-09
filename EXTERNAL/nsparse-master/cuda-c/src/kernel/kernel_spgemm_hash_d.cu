@@ -1216,6 +1216,7 @@ void spgemm_csrseg_kernel_hash(sfCSR *a, sfCSR *b, sfCSR *c, csrlocinfo *binfo, 
     set_max_bin(a->d_rpt, a->d_col, b->d_rpt, binfo,  bin, M);
   
     // -------------------------------------------------------------------------
+    // printf("M: %d\n", M);
     c->d_rpt = CUDA_MALLOC(itype, M + 1);
     // -------------------------------------------------------------------------
     

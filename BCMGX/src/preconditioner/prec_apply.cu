@@ -3,31 +3,30 @@
 #include "utility/mpi.h"
 #include "utility/profiling.h"
 
-void prec_apply(handles* h, CSR* Alocal, vector<vtype>* r_loc, vector<vtype>* u_loc, cgsprec* pr, const params& p, PrecOut* out)
+void prec_apply(handles* h, CSR* Alocal, vector<vtype>* r_loc, vector<vtype>* u_loc, Preconditioner* pr, const InputParameters& ip)
 {
     _MPI_ENV;
 
     beginProfiling(__FILE__, __FUNCTION__, __FUNCTION__);
 
-    switch (pr->ptype) {
+    switch (pr->type) {
     case PreconditionerType::NONE:
         break;
 
     case PreconditionerType::BCMG:
-        bcmg_apply(h, Alocal, r_loc, u_loc, pr, p, out);
+        bcmg_apply(h, Alocal, r_loc, u_loc, pr, ip);
         break;
 
     case PreconditionerType::L1_JACOBI:
-        l1jacobi_apply(h, Alocal, r_loc, u_loc, pr, p, out);
+        l1jacobi_apply(h, Alocal, r_loc, u_loc, pr, ip);
         break;
 
     case PreconditionerType::AFSAI:
-        afsai_apply(h, Alocal, r_loc, u_loc, pr, p, out);
+        afsai_apply(h, Alocal, r_loc, u_loc, pr, ip);
         break;
 
     default:
-        printf("Unhandled value for enum class PreconditionerType in %s().\n", __FUNCTION__);
-        exit(0);
+        DIE("Unhandled value for enum class PreconditionerType in %s().\n", __FUNCTION__);
     }
 
     cudaDeviceSynchronize();

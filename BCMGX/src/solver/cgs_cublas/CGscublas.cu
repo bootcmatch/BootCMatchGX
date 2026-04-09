@@ -1,9 +1,9 @@
 // This code implements the CG s-step method introduced in the following papers:
-// Chronopoulos, A., Gear, C., s-step Iterative Methods for Symmetric Linear Systems, 
+// Chronopoulos, A., Gear, C., s-step Iterative Methods for Symmetric Linear Systems,
 // J. Comput. Appl. Math., Vol. 25, N. 2, 1989. pages 153--168.
-// Chronopoulos, A., Gear, C., On the Efficient Implementation of Preconditioned s-step Conjugate Gradient Methods on Multiprocessors with Memory Hierarchy, 
+// Chronopoulos, A., Gear, C., On the Efficient Implementation of Preconditioned s-step Conjugate Gradient Methods on Multiprocessors with Memory Hierarchy,
 // Parallel Computing, Vol. 11, N. 1, 1989, pages 37--53.
-// Here we use cublas for basic operations on small dense matrices. 
+// Here we use cublas for basic operations on small dense matrices.
 
 #include "CGscublas.h"
 
@@ -46,7 +46,7 @@ void computevm_cublas(handles* h, vector<vtype>* sP, int s, vector<vtype>* r_loc
     Vector::freedh(svm);
 }
 
-int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x0_loc, const params& p, cgsprec* pr, SolverOut* out)
+int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x0_loc, const InputParameters& ip, const CurrentParameters& cp, Preconditioner* pr, SolverOut* out)
 {
     _MPI_ENV;
 
@@ -58,13 +58,13 @@ int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype
     stype ln = Alocal->n;
     gstype fn = Alocal->full_n;
 
-    s = p.sstep;
+    s = cp.sstep;
 
-    out->resHist = MALLOC(vtype, p.itnlim, true);
+    out->resHist = MALLOC(vtype, ip.itnlim, true);
 
     vector<vtype>* u1_loc = Vector::init<vtype>(ln, true, true);
     vector<vtype>* u_loc = NULL;
-    if (pr->ptype != PreconditionerType::NONE) {
+    if (pr->type != PreconditionerType::NONE) {
         u_loc = Vector::init<vtype>(ln, true, true);
     }
     vector<vtype>* x_loc = Vector::init<vtype>(ln, true, true);
@@ -82,7 +82,7 @@ int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype
 
     vector<vtype>* sCP1 = NULL;
     vector<vtype>* sCP2 = NULL;
-    if (pr->ptype == PreconditionerType::NONE && p.ru_res) {
+    if (pr->type == PreconditionerType::NONE && ip.ru_res) {
         sCP1 = Vector::init<vtype>(ln * s, true, true);
         sCP2 = Vector::init<vtype>(ln * s, true, true);
     }
@@ -115,7 +115,7 @@ int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype
     vtype sminusone = -1.0;
     vtype delta0 = 1.0;
 
-    if (p.stop_criterion == 1) {
+    if (ip.stop_criterion == 1) {
         delta0 = Vector::norm_MPI(h->cublas_h, r_loc);
     }
 
@@ -124,10 +124,10 @@ int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype
     }
 
     int iter = 0;
-    for (iter = 0; iter < p.itnlim; iter++) {
+    for (iter = 0; iter < ip.itnlim; iter++) {
 
-        if (iter > 0 && info == 0 && p.ru_res && p.rec_res_int > 0 && iter % p.rec_res_int == 0) {
-            if (p.dispnorm) {
+        if (iter > 0 && info == 0 && ip.ru_res && ip.rec_res_int > 0 && iter % ip.rec_res_int == 0) {
+            if (ip.dispnorm) {
                 printf("recompute residual\n");
             }
 
@@ -139,9 +139,9 @@ int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype
         }
 
         if (info == 0 && iter % 2 == 0) { // even
-            mpk(h, Alocal, r_loc, s, sP2, pr, u1_loc, p, out);
+            mpk(h, Alocal, r_loc, s, sP2, pr, u1_loc, ip, cp, out);
 
-            computevm_cublas(h, sP2, s, r_loc, vm, pr->ptype != PreconditionerType::NONE);
+            computevm_cublas(h, sP2, s, r_loc, vm, pr->type != PreconditionerType::NONE);
 
             info = scalarWorkMO(vm, W, alpha, beta, s, iter);
 
@@ -153,7 +153,7 @@ int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype
             Vector::copydhToD<vtype>(alpha);
             Vector::copydhToD<vtype>(beta);
 
-            if (p.ru_res && pr->ptype == PreconditionerType::NONE) {
+            if (ip.ru_res && pr->type == PreconditionerType::NONE) {
                 CHECK_DEVICE(cudaMemcpy(sCP2->val, sP2->val + ln, ln * s * sizeof(vtype), cudaMemcpyDeviceToDevice));
             }
 
@@ -161,8 +161,8 @@ int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype
             cublasDgemm(h->cublas_h, CUBLAS_OP_N, CUBLAS_OP_N, ln, s, s, &sone, sP1->val, ln, beta->val, s, &sone, sP2->val, ln);
             cublasDgemv(h->cublas_h, CUBLAS_OP_N, ln, s, &sone, sP2->val, ln, alpha->val, 1, &sone, x_loc->val, 1);
 
-            if (p.ru_res) {
-                if (pr->ptype != PreconditionerType::NONE) {
+            if (ip.ru_res) {
+                if (pr->type != PreconditionerType::NONE) {
                     // sP2[:,s+1:2s]=sP2[:,s+1:2s]+sP1[:,s+1:2s]*beta, r_loc=r_loc-sP2[:,s+1:2s]*alpha
                     cublasDgemm(h->cublas_h, CUBLAS_OP_N, CUBLAS_OP_N, ln, s, s, &sone, sP1->val + s * ln, ln, beta->val, s, &sone, sP2->val + s * ln, ln);
                     cublasDgemv(h->cublas_h, CUBLAS_OP_N, ln, s, &sminusone, sP2->val + s * ln, ln, alpha->val, 1, &sone, r_loc->val, 1);
@@ -183,9 +183,9 @@ int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype
         } // end even
 
         if (info == 0 && iter % 2 == 1) { // odd
-            mpk(h, Alocal, r_loc, s, sP1, pr, u1_loc, p, out);
+            mpk(h, Alocal, r_loc, s, sP1, pr, u1_loc, ip, cp, out);
 
-            computevm_cublas(h, sP1, s, r_loc, vm, pr->ptype != PreconditionerType::NONE);
+            computevm_cublas(h, sP1, s, r_loc, vm, pr->type != PreconditionerType::NONE);
 
             info = scalarWorkMO(vm, W, alpha, beta, s, iter);
 
@@ -197,7 +197,7 @@ int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype
             Vector::copydhToD<vtype>(alpha);
             Vector::copydhToD<vtype>(beta);
 
-            if (p.ru_res && pr->ptype == PreconditionerType::NONE) {
+            if (ip.ru_res && pr->type == PreconditionerType::NONE) {
                 CHECK_DEVICE(cudaMemcpy(sCP1->val, sP1->val + ln, ln * s * sizeof(vtype), cudaMemcpyDeviceToDevice));
             }
 
@@ -205,8 +205,8 @@ int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype
             cublasDgemm(h->cublas_h, CUBLAS_OP_N, CUBLAS_OP_N, ln, s, s, &sone, sP2->val, ln, beta->val, s, &sone, sP1->val, ln);
             cublasDgemv(h->cublas_h, CUBLAS_OP_N, ln, s, &sone, sP1->val, ln, alpha->val, 1, &sone, x_loc->val, 1);
 
-            if (p.ru_res) {
-                if (pr->ptype != PreconditionerType::NONE) {
+            if (ip.ru_res) {
+                if (pr->type != PreconditionerType::NONE) {
                     // sP1[:,s+1:2s]=sP1[:,s+1:2s]+sP2[:,s+1:2s]*beta, r_loc=r_loc-sP1[:,s+1:2s]*alpha
                     cublasDgemm(h->cublas_h, CUBLAS_OP_N, CUBLAS_OP_N, ln, s, s, &sone, sP2->val + s * ln, ln, beta->val, s, &sone, sP1->val + s * ln, ln);
                     cublasDgemv(h->cublas_h, CUBLAS_OP_N, ln, s, &sminusone, sP1->val + s * ln, ln, alpha->val, 1, &sone, r_loc->val, 1);
@@ -228,13 +228,13 @@ int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype
         l2_norm = Vector::norm_MPI(h->cublas_h, r_loc);
 
         if (ISMASTER) {
-            if (p.dispnorm) {
+            if (ip.dispnorm) {
                 printf("%d) r norm: %.10lf\n", iter, l2_norm);
             }
             out->resHist[iter + 1] = l2_norm;
         }
 
-        if (l2_norm < p.rtol * delta0) {
+        if (l2_norm < ip.rtol * delta0) {
             excnlim = 0;
             retval = 0;
             break;
@@ -266,20 +266,20 @@ int cgsstep_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype
     Vector::freedh(vm);
     Vector::freedh(alpha);
     Vector::freedh(beta);
-    if (pr->ptype == PreconditionerType::NONE && p.ru_res) {
+    if (pr->type == PreconditionerType::NONE && ip.ru_res) {
         Vector::free(sCP1);
         Vector::free(sCP2);
     }
     Vector::free(u1_loc);
-    if (pr->ptype != PreconditionerType::NONE) {
+    if (pr->type != PreconditionerType::NONE) {
         Vector::free(u_loc);
     }
 
     return retval;
 }
 
-vector<vtype>* solve_cgs_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x0_loc, cgsprec* pr, const params& p, SolverOut* out)
+vector<vtype>* solve_cgs_cublas(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x0_loc, Preconditioner* pr, const InputParameters& ip, const CurrentParameters& cp, SolverOut* out)
 {
-    out->retv = cgsstep_cublas(h, Alocal, rhs_loc, x0_loc, p, pr, out);
+    out->retv = cgsstep_cublas(h, Alocal, rhs_loc, x0_loc, ip, cp, pr, out);
     return out->sol_local;
 }

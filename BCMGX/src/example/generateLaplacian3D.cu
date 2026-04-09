@@ -97,8 +97,7 @@ int main(int argc, char** argv)
             break;
         case 'h':
         default:
-            printf(USAGE, argv[0]);
-            exit(EXIT_FAILURE);
+            DIE(USAGE, argv[0]);
         }
     }
 
@@ -106,8 +105,7 @@ int main(int argc, char** argv)
         || P == 0 || Q == 0 || R == 0
         || out_file_name == NULL
         || generator == INVALIG_GEN) {
-        printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        DIE(USAGE, argv[0]);
     }
 
     int myid, nprocs, device_id;
@@ -127,12 +125,10 @@ int main(int argc, char** argv)
         sprintf(filename, "%s_%d", log_file_name, myid);
         log_file = fopen(filename, "w");
         if (log_file == NULL) {
-            fprintf(stderr, "Error opening file <%s>\n", filename);
-            exit(EXIT_FAILURE);
+            DIE("Error opening file <%s>\n", filename);
         }
         if (atexit(close_log_file)) {
-            fprintf(stderr, "Error registering atexit\n");
-            exit(EXIT_FAILURE);
+            DIE("Error registering atexit\n");
         }
     }
 
@@ -145,9 +141,9 @@ int main(int argc, char** argv)
         Alocal = generateLocalLaplacian3D_27p(nx, ny, nz, P, Q, R);
         break;
     default:
-        printf("Invalid generator\n");
-        exit(1);
+        DIE("Invalid generator\n");
     }
+
     check_and_fix_order(Alocal);
     Alocal->col_shifted = -Alocal->row_shift;
 

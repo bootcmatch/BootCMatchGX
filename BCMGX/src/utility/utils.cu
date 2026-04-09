@@ -1,6 +1,8 @@
 #include "utility/setting.h"
 #include "utility/utils.h"
 
+bool trace_enabled = 0;
+
 // void check_free_memory(int myid){
 //     size_t free_mem, total_mem;
 //     CHECK_DEVICE( cudaMemGetInfo( &free_mem, &total_mem ))
@@ -60,13 +62,11 @@ GridBlock _getKernelParams(int desiredThreads, const char* file, int line)
     }
 
     if (nt == 0) {
-        fprintf(stderr, "Error in file %s at line %d: block size cannot be 0\n", file, line);
-        exit(1);
+        DIE("Error in file %s at line %d: block size cannot be 0\n", file, line);
     }
 
     if (nb == 0) {
-        fprintf(stderr, "Error in file %s at line %d: grid size cannot be 0\n", file, line);
-        exit(1);
+        DIE("Error in file %s at line %d: grid size cannot be 0\n", file, line);
     }
 
     gb.g = nb;
@@ -119,7 +119,76 @@ void CHECK_CUBLAS(cublasStatus_t err)
 {
     const char* err_str = cublasGetStatusString(err);
     if (err != CUBLAS_STATUS_SUCCESS) {
-        printf("[ERROR CUBLAS] :\n\t%s\n", err_str);
-        exit(1);
+        DIE("[ERROR CUBLAS] :\n\t%s\n", err_str);
     }
+}
+
+PointerType getPointerType(void* ptr)
+{
+    cudaPointerAttributes attributes;
+    cudaError_t err = cudaPointerGetAttributes(&attributes, ptr);
+
+#if CUDART_VERSION >= 10000
+    if (err == cudaSuccess) {
+        if (attributes.type == cudaMemoryTypeDevice) {
+            return PointerType::DEVICE;
+        } else if (attributes.type == cudaMemoryTypeHost) {
+            return PointerType::HOST;
+        } else if (attributes.type == cudaMemoryTypeManaged) {
+            return PointerType::MANAGED;
+        } else {
+            return PointerType::UNKNOWN;
+        }
+    } else {
+        DIE("%s\n", cudaGetErrorString(err));
+    }
+#else
+    if (err == cudaSuccess) {
+        if (attributes.memoryType == cudaMemoryTypeDevice) {
+            return PointerType::DEVICE;
+        } else if (attributes.memoryType == cudaMemoryTypeHost) {
+            return PointerType::HOST;
+        } else {
+            return PointerType::UNKNOWN;
+        }
+    } else {
+        DIE("%s\n", cudaGetErrorString(err));
+    }
+#endif
+}
+
+void printPointerInfo(FILE* out, void* ptr, const char* ptrName, const char* file, int line)
+{
+    cudaPointerAttributes attributes;
+    cudaError_t err = cudaPointerGetAttributes(&attributes, ptr);
+
+    if (err == cudaSuccess) {
+#if CUDART_VERSION >= 10000
+        if (attributes.type == cudaMemoryTypeDevice) {
+            fprintf(out, "Device pointer found at %s:%d - %s.\n", file, line, ptrName);
+        } else if (attributes.type == cudaMemoryTypeHost) {
+            fprintf(out, "Host pointer found at %s:%d - %s.\n", file, line, ptrName);
+        } else if (attributes.type == cudaMemoryTypeManaged) {
+            fprintf(out, "Managed (shared) pointer found at %s:%d - %s.\n", file, line, ptrName);
+        } else {
+            fprintf(out, "Unknown pointer type at %s:%d - %s\n", file, line, ptrName);
+        }
+#else
+        if (attributes.memoryType == cudaMemoryTypeDevice) {
+            fprintf(out, "Device pointer found at %s:%d - %s.\n", file, line, ptrName);
+        } else if (attributes.memoryType == cudaMemoryTypeHost) {
+            fprintf(out, "Host pointer found at %s:%d - %s.\n", file, line, ptrName);
+        } else {
+            fprintf(out, "Unknown pointer type at %s:%d - %s\n", file, line, ptrName);
+        }
+#endif
+    } else {
+        DIE("%s\n", cudaGetErrorString(err));
+    }
+}
+
+bool vtypeEq(const vtype &a, const vtype &b) {
+    const double tol = 1e-12;
+
+    return fabs(a - b) <= tol;
 }

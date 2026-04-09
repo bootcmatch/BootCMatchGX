@@ -417,8 +417,7 @@ void CSRm::checkMatching(vector<itype>* v_)
         }
 
         if (V->val[u] != v) {
-            printf("\n%d]ERROR-MATCHING: %d %d %d\n", myid, i, v, V->val[u]);
-            exit(1);
+            DIE("\n%d]ERROR-MATCHING: %d %d %d\n", myid, i, v, V->val[u]);
         }
     }
 
@@ -495,8 +494,7 @@ const char* cusparseGetStatusString(cusparseStatus_t error)
         cusparseStatus_t status = X;                                                                        \
         if (status != CUSPARSE_STATUS_SUCCESS) {                                                            \
             const char* err_str = cusparseGetStatusString(status);                                          \
-            fprintf(stderr, "[ERROR CUSPARSE] :\n\t%s; LINE: %d; FILE: %s\n", err_str, __LINE__, __FILE__); \
-            exit(1);                                                                                        \
+            DIE("[ERROR CUSPARSE] :\n\t%s; LINE: %d; FILE: %s\n", err_str, __LINE__, __FILE__);             \
         }                                                                                                   \
     }
 

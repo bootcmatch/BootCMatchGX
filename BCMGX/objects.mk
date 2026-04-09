@@ -13,6 +13,8 @@ ALL_DEPS         := $(C_DEPS) $(CU_DEPS)
 
 OBJECTS = \
 	$(BUILDDIR)/EXTERNAL/nsparse.o \
+	$(BUILDDIR)/EXTERNAL/nsp.o \
+	$(BUILDDIR)/EXTERNAL/nsp_calc_val_sort_rows.o \
 	$(ALL_OBJS)
 
 # ==============================================================================
@@ -38,12 +40,38 @@ info:
 	@echo ""
 
 # ==============================================================================
-# src/EXTERNAL
+# EXTERNAL - nsparse
 # ==============================================================================
 
-$(BUILDDIR)/EXTERNAL/nsparse.o: $(NSPARSE_PATH)/src/kernel/kernel_spgemm_hash_d.cu
+# $(BUILDDIR)/EXTERNAL/nsparse.o: $(NSPARSE_PATH)/src/kernel/kernel_spgemm_hash_d.cu
+$(BUILDDIR)/EXTERNAL/nsparse.o: $(NSPARSE_PATH)/src/kernel/kernel_spgemm_hash_d_nodeps_v1.cu
 	$(MKDIR) $(@D)
 	$(NVCC) -c -DDOUBLE -o $@ $(DEFINE) $(LIBS) $(INCLUDE) $(NSPARSE_GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
+
+# ==============================================================================
+# EXTERNAL - nsp
+# ==============================================================================
+
+$(BUILDDIR)/EXTERNAL/nsp.o: $(NSP_PATH)/../obj/nsp.o
+	$(MKDIR) $(@D)
+	$(COPY) $< $@
+
+$(BUILDDIR)/EXTERNAL/nsp_calc_val_sort_rows.o: $(NSP_PATH)/../obj/nsp_calc_val_sort_rows.o
+	$(MKDIR) $(@D)
+	$(COPY) $< $@
+
+$(NSP_PATH)/../obj/nsp.o $(NSP_PATH)/../obj/nsp_calc_val_sort_rows.o:
+	@if [ ! -f "$@" ]; then \
+	    cd $(NSP_PATH)/.. && $(MAKE); \
+	fi
+
+# $(BUILDDIR)/EXTERNAL/nsp.o: $(NSP_PATH)/src/nsp.cu
+# 	$(MKDIR) $(@D)
+# 	$(NVCC) -c -DDOUBLE -o $@ $(DEFINE) $(LIBS) $(INCLUDE) $(NSPARSE_GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
+
+# $(BUILDDIR)/EXTERNAL/nsp_calc_val_sort_rows.o: $(NSP_PATH)/src/nsp_calc_val_sort_rows.cu
+# 	$(MKDIR) $(@D)
+# 	$(NVCC) -c -DDOUBLE -o $@ $(DEFINE) $(LIBS) $(INCLUDE) $(NSP_GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
 
 # ==============================================================================
 # Everything else

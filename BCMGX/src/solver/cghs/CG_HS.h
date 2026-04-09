@@ -23,9 +23,9 @@
  * @param Alocal Pointer to the sparse matrix in CSR format.
  * @param rhs_loc Right-hand side vector.
  * @param x0_loc Initial solution guess.
- * @param p User-defined solver and preconditioner settings (like iteration limits, stopping criteria, etc.).
+ * @param ip User-defined solver and preconditioner settings (like iteration limits, stopping criteria, etc.).
  * @param pr Actual preconditioner data (such as preconditioner type and internal structures).
  * @param out Solver output structure.
  * @return The computed solution vector.
  */
-vector<vtype>* solve_cg_hs(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x0_loc, cgsprec* pr, const params& p, SolverOut* out);
+vector<vtype>* solve_cg_hs(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x0_loc, Preconditioner* pr, const InputParameters& ip, const CurrentParameters& cp, SolverOut* out);

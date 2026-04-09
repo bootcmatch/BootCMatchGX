@@ -4,17 +4,17 @@
 #include "op/basic.h"
 #include "op/double_merged_axpy.h"
 #include "op/triple_inner_product.h"
-#include "preconditioner/bcmg/BcmgPreconditionContext.h"
+// #include "preconditioner/bcmg/BcmgPreconditionContext.h"
 #include "preconditioner/prec_apply.h"
 #include "utility/profiling.h"
 
 /**
  * @brief Performs Flexible Conjugate Gradient method (v3) to solve a linear system.
- * 
+ *
  * This function solves the system \(A x = b\) using the Flexible Conjugate Gradient method,
  * with the option to use a preconditioner. It applies the method iteratively, checking for convergence
  * based on the relative residual norm and a given tolerance.
- * 
+ *
  * @param A The matrix representing the linear system (CSR format).
  * @param h Handles for CUDA streams and various resources.
  * @param x The initial guess for the solution.
@@ -24,11 +24,11 @@
  * @param out Output structure to store results, including convergence history and other statistics.
  * @return int Return value indicating the exit status: 0 for success, -1 if iteration limit is reached.
  */
-int flexibileConjugateGradients_v3(CSR* A, handles* h, vector<vtype>* x, vector<vtype>* rhs, cgsprec* pr, const params& p, SolverOut* out)
+int flexibileConjugateGradients_v3(CSR* A, handles* h, vector<vtype>* x, vector<vtype>* rhs, Preconditioner* pr, const InputParameters& ip, const CurrentParameters& cp, SolverOut* out)
 {
     _MPI_ENV;
 
-    // This should contain info about the "exit status"... so far set to -1 only if iter > p.itnlim
+    // This should contain info about the "exit status"... so far set to -1 only if iter > ip.itnlim
     int retval = 0;
 
     vector<vtype>* v = Vector::init<vtype>(A->n, true, true);
@@ -50,8 +50,8 @@ int flexibileConjugateGradients_v3(CSR* A, handles* h, vector<vtype>* x, vector<
     vtype delta0 = Vector::norm_MPI(h->cublas_h, r);
     vtype rhs_norm = Vector::norm_MPI(h->cublas_h, rhs);
 
-    if (p.sprec != PreconditionerType::NONE) {
-        prec_apply(h, A, r, v, pr, p, &out->precOut);
+    if (ip.sprec != PreconditionerType::NONE) {
+        prec_apply(h, A, r, v, pr, ip);
     } else {
         Vector::copyTo(v, r, (nprocs > 1) ? *(A->os.streams->comm_stream) : 0);
     }
@@ -90,7 +90,7 @@ int flexibileConjugateGradients_v3(CSR* A, handles* h, vector<vtype>* x, vector<
 
     vtype l2_norm = Vector::norm_MPI(h->cublas_h, r);
 
-    if (l2_norm <= p.rtol * delta0) {
+    if (l2_norm <= ip.rtol * delta0) {
         out->niter = 1;
     }
 
@@ -105,8 +105,8 @@ int flexibileConjugateGradients_v3(CSR* A, handles* h, vector<vtype>* x, vector<
         if (idx == 0) {
             Vector::fillWithValue(v, 0.);
 
-            if (p.sprec != PreconditionerType::NONE) {
-                prec_apply(h, A, r, v, pr, p, &out->precOut);
+            if (ip.sprec != PreconditionerType::NONE) {
+                prec_apply(h, A, r, v, pr, ip);
             } else {
                 // Vector::copyTo(v, r);
                 Vector::copyTo(v, r, (nprocs > 1) ? *(A->os.streams->comm_stream) : 0);
@@ -118,8 +118,8 @@ int flexibileConjugateGradients_v3(CSR* A, handles* h, vector<vtype>* x, vector<
         } else {
             Vector::fillWithValue(d, 0.);
 
-            if (p.sprec != PreconditionerType::NONE) {
-                prec_apply(h, A, r, d, pr, p, &out->precOut);
+            if (ip.sprec != PreconditionerType::NONE) {
+                prec_apply(h, A, r, d, pr, ip);
             } else {
                 Vector::copyTo(d, r, (nprocs > 1) ? *(A->os.streams->comm_stream) : 0);
             }
@@ -146,18 +146,18 @@ int flexibileConjugateGradients_v3(CSR* A, handles* h, vector<vtype>* x, vector<
         l2_norm = Vector::norm_MPI(h->cublas_h, r);
 
         if (ISMASTER) {
-            if (p.dispnorm) {
+            if (ip.dispnorm) {
                 printf("%d) r norm: %.10lf\n", iter, l2_norm);
             }
         }
 
         iter++;
 
-    } while (l2_norm > p.rtol * delta0 && iter < p.itnlim);
+    } while (l2_norm > ip.rtol * delta0 && iter < ip.itnlim);
 
     assert(std::isfinite(l2_norm));
 
-    if (iter >= p.itnlim) {
+    if (iter >= ip.itnlim) {
         retval = -1;
     }
 
@@ -176,10 +176,10 @@ int flexibileConjugateGradients_v3(CSR* A, handles* h, vector<vtype>* x, vector<
 
 /**
  * @brief Solves a linear system using the Flexible Conjugate Gradient method (v3).
- * 
+ *
  * This function wraps the flexible conjugate gradient method, calling it and managing
  * the solution process. It stores the solution in `x0` and provides a copy in the return value.
- * 
+ *
  * @param h Handles for CUDA streams and various resources.
  * @param Alocal The matrix representing the linear system (CSR format).
  * @param rhs The right-hand side vector.
@@ -189,7 +189,7 @@ int flexibileConjugateGradients_v3(CSR* A, handles* h, vector<vtype>* x, vector<
  * @param out Output structure to store results, including convergence history and other statistics.
  * @return vector<vtype>* The solution vector.
  */
-vector<vtype>* solve_fcg(handles* h, CSR* Alocal, vector<vtype>* rhs, vector<vtype>* x0, cgsprec* pr, const params& p, SolverOut* out)
+vector<vtype>* solve_fcg(handles* h, CSR* Alocal, vector<vtype>* rhs, vector<vtype>* x0, Preconditioner* pr, const InputParameters& ip, const CurrentParameters& cp, SolverOut* out)
 {
     _MPI_ENV;
 
@@ -202,7 +202,8 @@ vector<vtype>* solve_fcg(handles* h, CSR* Alocal, vector<vtype>* rhs, vector<vty
         x0,
         rhs,
         pr,
-        p,
+        ip,
+        cp,
         out);
 
     CHECK_MPI(MPI_Barrier(MPI_COMM_WORLD));

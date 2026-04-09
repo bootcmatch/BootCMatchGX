@@ -11,7 +11,7 @@
 
 #include "datastruct/CSR.h"
 #include "utility/assignDeviceToProcess.h"
-#include "utility/distribuite.h"
+#include "utility/distribute.h"
 #include "utility/globals.h"
 #include "utility/handles.h"
 #include "utility/input.h"
@@ -102,14 +102,12 @@ int main(int argc, char** argv)
             break;
         case 'h':
         default:
-            printf(USAGE, argv[0]);
-            exit(EXIT_FAILURE);
+            DIE(USAGE, argv[0]);
         }
     }
 
     if (opt == NONE || generator == INVALIG_GEN) {
-        printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        DIE(USAGE, argv[0]);
     }
 
     // -------------------------------------------------------------------------
@@ -189,12 +187,10 @@ int main(int argc, char** argv)
     //     sprintf(filename, "%s_%d", log_file_name, myid);
     //     log_file = fopen(filename, "w");
     //     if (log_file == NULL) {
-    //         fprintf(stderr, "Error opening file <%s>\n", filename);
-    //         exit(EXIT_FAILURE);
+    //         DIE("Error opening file <%s>\n", filename);
     //     }
     //     if (atexit(close_log_file)) {
-    //         fprintf(stderr, "Error registering atexit\n");
-    //         exit(EXIT_FAILURE);
+    //         DIE("Error registering atexit\n");
     //     }
     // }
 

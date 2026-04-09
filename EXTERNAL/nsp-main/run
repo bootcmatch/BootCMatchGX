@@ -1,0 +1,12 @@
+# matrices must be stored in coordinate format, either in binary (by default, ascii = 0) or ascii (ascii = 1).
+# by default it assumes that the matrix pattern is stored in long int, while values are stored in double format.
+# the header of matrix is of the format [nrows ncols nterms] when header = 1 (by default)
+# and [nrows nterms] when header = 0.
+# the partition among MPI ranks is done by splitting nrows 
+
+mpirun -np 1 \                     # number of processors (1 by default)
+        bin/main_nsp \             # driver
+        /path2matrix_A \           # path to matrix A
+        /path2matrix_B \           # path to matrix B
+        0 1 \                      # ascii, header
+        0 0 \                      # printout, printinfo

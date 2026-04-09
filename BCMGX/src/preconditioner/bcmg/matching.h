@@ -8,7 +8,7 @@
 
 /**
  * @brief Applies the suitor algorithm to a given matrix in the AMG setup.
- * 
+ *
  * @param h CUDA Handles.
  * @param amg_data AMG build data structure.
  * @param A Input matrix in CSR format.

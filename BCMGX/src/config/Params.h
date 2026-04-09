@@ -2,16 +2,17 @@
  * @file
  * @brief This file contains various enumerations, utility functions, and configuration structures used to define
  *        parameters and solvers for solving systems of equations.
- * 
- * The file defines solvers, preconditioners, AMG-related types, and various configuration parameters for managing 
+ *
+ * The file defines solvers, preconditioners, AMG-related types, and various configuration parameters for managing
  * and solving equations. Additionally, it provides utility functions for converting between enums and strings.
  */
 
 #pragma once
 
 #include <string>
+#include <vector>
 
-#define GLOB_MEM_ALLOC_SIZE 2000000 /**< Default memory allocation size */
+#define GLOB_MEM_ALLOC_SIZE 16000000 /**< Default memory allocation size */
 
 /**
  * @enum SolverType
@@ -20,17 +21,19 @@
 enum class SolverType {
     CGHS, /**< Conjugate Gradient with Hybrid Solver */
     FCG, /**< Flexible Conjugate Gradient */
-    CGS, /**< Conjugate Gradient Squared */
-    PIPELINED_CGS, /**< Pipeline-based Conjugate Gradient Squared */
-    CGS_CUBLAS, /**< Conjugate Gradient Squared using cuBLAS */
+    CGS, /**< Conjugate Gradient s-step */
+    PIPELINED_CGS, /**< Pipeline-based Conjugate Gradient s-step */
+    CGS_CUBLAS, /**< Conjugate Gradient s-step using cuBLAS */
+    LSGS, /**< CGS Lanczos with Gauss-Seidel */
+    CGSN, /**< CGS Naumov */
     INVALID /**< Represents an invalid solver type */
 };
 
 /**
  * @brief Utility function to convert a string to SolverType.
- * 
+ *
  * This function maps a string value to the corresponding SolverType enum value.
- * 
+ *
  * @param str The string representation of a solver type.
  * @return Corresponding SolverType enum value.
  */
@@ -38,9 +41,9 @@ SolverType string_to_solver_type(const std::string& str);
 
 /**
  * @brief Utility function to convert SolverType to a string.
- * 
+ *
  * This function converts a SolverType enum value to its corresponding string representation.
- * 
+ *
  * @param val The SolverType enum value.
  * @return Corresponding string representation.
  */
@@ -59,9 +62,9 @@ enum class BootstrapCompositionType {
 
 /**
  * @brief Utility function to convert a string to BootstrapCompositionType.
- * 
+ *
  * This function maps a string value to the corresponding BootstrapCompositionType enum value.
- * 
+ *
  * @param str The string representation of a bootstrap composition type.
  * @return Corresponding BootstrapCompositionType enum value.
  */
@@ -69,9 +72,9 @@ BootstrapCompositionType string_to_bootstrap_composition_type(const std::string&
 
 /**
  * @brief Utility function to convert BootstrapCompositionType to a string.
- * 
+ *
  * This function converts a BootstrapCompositionType enum value to its corresponding string representation.
- * 
+ *
  * @param val The BootstrapCompositionType enum value.
  * @return Corresponding string representation.
  */
@@ -88,9 +91,9 @@ enum class MatchType {
 
 /**
  * @brief Utility function to convert a string to MatchType.
- * 
+ *
  * This function maps a string value to the corresponding MatchType enum value.
- * 
+ *
  * @param str The string representation of a match type.
  * @return Corresponding MatchType enum value.
  */
@@ -98,9 +101,9 @@ MatchType string_to_match_type(const std::string& str);
 
 /**
  * @brief Utility function to convert MatchType to a string.
- * 
+ *
  * This function converts a MatchType enum value to its corresponding string representation.
- * 
+ *
  * @param val The MatchType enum value.
  * @return Corresponding string representation.
  */
@@ -120,9 +123,9 @@ enum class CycleType {
 
 /**
  * @brief Utility function to convert a string to CycleType.
- * 
+ *
  * This function maps a string value to the corresponding CycleType enum value.
- * 
+ *
  * @param str The string representation of a cycle type.
  * @return Corresponding CycleType enum value.
  */
@@ -130,9 +133,9 @@ CycleType string_to_cycle_type(const std::string& str);
 
 /**
  * @brief Utility function to convert CycleType to a string.
- * 
+ *
  * This function converts a CycleType enum value to its corresponding string representation.
- * 
+ *
  * @param val The CycleType enum value.
  * @return Corresponding string representation.
  */
@@ -149,9 +152,9 @@ enum class CoarseSolverType {
 
 /**
  * @brief Utility function to convert a string to CoarseSolverType.
- * 
+ *
  * This function maps a string value to the corresponding CoarseSolverType enum value.
- * 
+ *
  * @param str The string representation of a coarse solver type.
  * @return Corresponding CoarseSolverType enum value.
  */
@@ -159,9 +162,9 @@ CoarseSolverType string_to_coarse_solver_type(const std::string& str);
 
 /**
  * @brief Utility function to convert CoarseSolverType to a string.
- * 
+ *
  * This function converts a CoarseSolverType enum value to its corresponding string representation.
- * 
+ *
  * @param val The CoarseSolverType enum value.
  * @return Corresponding string representation.
  */
@@ -178,9 +181,9 @@ enum class RelaxType {
 
 /**
  * @brief Utility function to convert a string to RelaxType.
- * 
+ *
  * This function maps a string value to the corresponding RelaxType enum value.
- * 
+ *
  * @param str The string representation of a relaxation type.
  * @return Corresponding RelaxType enum value.
  */
@@ -188,9 +191,9 @@ RelaxType string_to_relax_type(const std::string& str);
 
 /**
  * @brief Utility function to convert RelaxType to a string.
- * 
+ *
  * This function converts a RelaxType enum value to its corresponding string representation.
- * 
+ *
  * @param val The RelaxType enum value.
  * @return Corresponding string representation.
  */
@@ -210,9 +213,9 @@ enum class PreconditionerType {
 
 /**
  * @brief Utility function to convert a string to PreconditionerType.
- * 
+ *
  * This function maps a string value to the corresponding PreconditionerType enum value.
- * 
+ *
  * @param str The string representation of a preconditioner type.
  * @return Corresponding PreconditionerType enum value.
  */
@@ -220,22 +223,22 @@ PreconditionerType string_to_preconditioner_type(const std::string& str);
 
 /**
  * @brief Utility function to convert PreconditionerType to a string.
- * 
+ *
  * This function converts a PreconditionerType enum value to its corresponding string representation.
- * 
+ *
  * @param val The PreconditionerType enum value.
  * @return Corresponding string representation.
  */
 std::string preconditioner_type_to_string(const PreconditionerType& val);
 
 /**
- * @struct params
+ * @struct InputParameters
  * @brief A structure to hold solver and preconditioner configuration parameters.
- * 
+ *
  * This structure holds various configuration settings such as memory allocation sizes, solver types, AMG cycle settings,
  * and other related parameters for configuring and executing solvers and preconditioners.
  */
-struct params {
+struct InputParameters {
     int mem_alloc_size = GLOB_MEM_ALLOC_SIZE; /**< Memory allocation size */
     int error = 0; /**< Error code */
 
@@ -245,20 +248,19 @@ struct params {
 
     std::string rhsfile = "NONE"; /**< Right-hand side file */
     std::string solfile = "NONE"; /**< Solution file */
-    SolverType solver_type = SolverType::CGHS; /**< Solver type */
+    std::vector<SolverType> solver_types; /**< Solver type */
     int itnlim = 2000; /**< Iteration limit */
     double rtol = 1.e-6; /**< Relative tolerance */
     int dispnorm = 1; /**< Display norm */
 
     PreconditionerType sprec = PreconditionerType::NONE; /**< Preconditioner type */
 
-
     // =========================================================================
     // BCMG Preconditioner
     // =========================================================================
 
     BootstrapCompositionType bootstrap_composition_type = BootstrapCompositionType::MULTIPLICATIVE; /**< Bootstrap composition type */
-    int max_hrc = 1; /**< Maximum hierarchical coarse grid levels */
+    int max_hrc = 5; /**< Maximum hierarchical coarse grid levels */
     double conv_ratio = 0.8; /**< Convergence ratio */
     MatchType matchtype = MatchType::SUITOR; /**< Matching type */
     int aggrsweeps = 2; /**< Aggregation sweeps */
@@ -268,6 +270,7 @@ struct params {
     CoarseSolverType coarse_solver = CoarseSolverType::L1_JACOBI; /**< Coarse solver type */
     RelaxType relax_type = RelaxType::L1_JACOBI; /**< Relaxation type */
     int relaxnumber_coarse = 20; /**< Number of relaxation sweeps on the coarse grid */
+    int smoothed_prolungator = 0;
 
     // int coarsesolver_type = 0;
 
@@ -284,45 +287,76 @@ struct params {
     // CGS Solver
     // =========================================================================
 
-    int sstep = 1; /**< Solver step */
+    std::vector<int> ssteps; /**< Solver step */
     int stop_criterion = 1; /**< Stopping criterion */
     int ru_res = 1; /**< Residual tolerance */
     int rec_res_int = 0; /**< Recovery residual interval */
+
+    // =========================================================================
+    // LSGS CGSN Solver
+    // =========================================================================
+
+    int use_chebyshev = 1;
+    int gs_iterations = 4;
+    double gs_tol = 1.e-6;
+    double power_method_tol = 1.e-4;
+    int power_method_itnlim = 1000;
+    double A_max_eigval = -1;
+    int use_fgs = 1;
+};
+
+struct CurrentParameters {
+    SolverType solver_type = SolverType::CGHS; /**< Solver type */
+    int sstep; /**< Solver step */
 };
 
 /**
  * @namespace Params
- * @brief Namespace containing utility functions to parse configuration files to @link params @endlink.
+ * @brief Namespace containing utility functions to parse configuration files to @link InputParameters @endlink.
  */
 namespace Params {
-    /**
-     * @brief Reads parameters from a properties file.
-     * 
-     * This function reads and initializes parameters from a `.properties` file.
-     * 
-     * @param path Path to the properties file.
-     * @return A params object initialized with values from the file.
-     */
-    params initFromPropertiesFile(const char* path);
+/**
+ * @brief Reads parameters from a properties file.
+ *
+ * This function reads and initializes parameters from a `.properties` file.
+ *
+ * @param path Path to the properties file.
+ * @return An InputParameters object initialized with values from the file.
+ */
+InputParameters initFromPropertiesFile(const char* path);
 
-    /**
-     * @brief Reads parameters from a deprecated file format.
-     * 
-     * This function is deprecated. Use `initFromPropertiesFile` instead.
-     * 
-     * @deprecated
-     * @param path Path to the deprecated configuration file.
-     * @return A params object initialized with values from the file.
-     */
-    params initFromFile(const char* path);
+/**
+ * @brief Reads parameters from a deprecated file format.
+ *
+ * This function is deprecated. Use `initFromPropertiesFile` instead.
+ *
+ * @deprecated
+ * @param path Path to the deprecated configuration file.
+ * @return An InputParameters object initialized with values from the file.
+ */
+InputParameters initFromFile(const char* path);
 
-    /**
-     * @brief Dumps the current parameters to an output stream.
-     * 
-     * This function prints the current configuration parameters to a file or console.
-     * 
-     * @param self The params object to dump.
-     * @param out The output stream to which the parameters will be dumped.
-     */
-    void dump(const params& self, FILE* out);
+/**
+ * @brief Dumps the current parameters to an output stream.
+ *
+ * This function prints the current configuration parameters to a file or console.
+ *
+ * @param self The InputParameters object to dump.
+ * @param out The output stream to which the parameters will be dumped.
+ */
+void dump(const InputParameters& self, const CurrentParameters& cp, FILE* out);
 }
+
+struct FemParameters {
+    int nx = 10;
+    int ny = 10;
+    int P = 2;
+    int Q = 2;
+    double E = 210e9; // Modulo di Young (Pa)
+    double nu = 0.3; // Coefficiente di Poisson
+};
+
+namespace FemParams {
+FemParameters initFromPropertiesFile(const char* path);
+};
+

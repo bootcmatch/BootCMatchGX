@@ -6,7 +6,7 @@
 #include "op/spspmpi.h"
 #include "preconditioner/bcmg/AMG.h"
 #include "utility/assignDeviceToProcess.h"
-#include "utility/distribuite.h"
+#include "utility/distribute.h"
 #include "utility/globals.h"
 #include "utility/handles.h"
 #include "utility/memory.h"
@@ -22,12 +22,17 @@
 #include <string>
 #include <unistd.h>
 
+// -------- AH glob --------
+extern itype* AH_glob_row;
+extern itype* AH_glob_col;
+extern gsstype* AH_glob_col8;
+extern vtype* AH_glob_val;
+// -------------------------
+
 CSR* makeAH(buildData* amg_data, CSR* A, vector<vtype>* w);
 CSR* toMaximumProductMatrix(CSR* AH);
 vector<int>* approx_match_gpu_suitor_v0(CSR* W, vector<itype>* M, vector<double>* ws, vector<int>* mutex);
 __global__ void _write_T_warp(itype n, int MINI_WARP_SIZE, vtype* A_val, itype* A_col, itype* A_row, itype shift);
-
-using namespace std;
 
 #define USAGE                                                                                                                                                   \
     "Usage: %s [--matrix <FILE_NAME> | --laplacian <SIZE> | --laplacian-3d <FILE_NAME>] [--time]\n\n"              \
@@ -38,8 +43,8 @@ using namespace std;
     "\t-a, --laplacian <SIZE>                      Generate a matrix whose size is <SIZE>^3.\n"                                                                 \
     "\t-t, --time                                  Output the execution time of the application\n\n" 
 
-extern vtype* d_temp_storage_max_min;
-extern vtype* min_max;
+// extern vtype* d_temp_storage_max_min;
+// extern vtype* min_max;
 
 enum generator_t {
     LAP_7P,
@@ -109,8 +114,7 @@ CSR* generate_lap3d_local_matrix(generator_t generator, const char* lap_3d_file)
         R = 5 };
     int* parms = read_laplacian_file(lap_3d_file);
     if (nprocs != (parms[P] * parms[Q] * parms[R])) {
-        fprintf(stderr, "Nproc must be equal to P*Q*R\n");
-        exit(EXIT_FAILURE);
+        DIE("Nproc must be equal to P*Q*R\n");
     }
     CSR* Alocal_host = Alocal_host = NULL;
     switch (generator) {
@@ -123,8 +127,7 @@ CSR* generate_lap3d_local_matrix(generator_t generator, const char* lap_3d_file)
         Alocal_host = generateLocalLaplacian3D_27p(parms[nx], parms[ny], parms[nz], parms[P], parms[Q], parms[R]);
         break;
     default:
-        printf("Invalid generator\n");
-        exit(1);
+        DIE("Invalid generator\n");
     }
     snprintf(idstring, sizeof(idstring), "%dx%dx%d", parms[P], parms[Q], parms[R]);
     FREE(parms);
@@ -181,13 +184,11 @@ int main(int argc, char** argv)
             break;
         case 'h':
         default:
-            printf(USAGE, argv[0]);
-            exit(EXIT_FAILURE);
+            DIE(USAGE, argv[0]);
         }
     }
     if (opt == NONE) {
-        printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        DIE(USAGE, argv[0]);
     }
 
     int myid, nprocs, device_id;
@@ -228,6 +229,7 @@ int main(int argc, char** argv)
 
     AH_glob_row = CUDA_MALLOC(itype, Alocal->n + 1);
     AH_glob_col = CUDA_MALLOC(itype, Alocal->nnz);
+    AH_glob_col8 = CUDA_MALLOC(gsstype, Alocal->nnz);
     AH_glob_val = CUDA_MALLOC(vtype, Alocal->nnz);
 
     vector<vtype>* ws_buffer = Vector::init<vtype>(n, true, true);
@@ -269,14 +271,15 @@ int main(int argc, char** argv)
     CUDA_FREE(AH_glob_row);
     CUDA_FREE(AH_glob_val);
     CUDA_FREE(AH_glob_col);
+    CUDA_FREE(AH_glob_col8);
     FREE(W);
 
     // if (xsize > 0) {
     CUDA_FREE(xvalstat);
     //}
 
-    CUDA_FREE(d_temp_storage_max_min);
-    CUDA_FREE(min_max);
+    // CUDA_FREE(d_temp_storage_max_min);
+    // CUDA_FREE(min_max);
 
     MPI_Finalize();
     return 0;

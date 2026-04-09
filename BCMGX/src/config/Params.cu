@@ -25,6 +25,10 @@ SolverType string_to_solver_type(const std::string& str)
         return SolverType::PIPELINED_CGS;
     } else if (str == "CGS_CUBLAS") {
         return SolverType::CGS_CUBLAS;
+    } else if (str == "LSGS") {
+        return SolverType::LSGS;
+    } else if (str == "CGSN") {
+        return SolverType::CGSN;
     } else {
         return SolverType::INVALID;
     }
@@ -43,11 +47,14 @@ std::string solver_type_to_string(const SolverType& val)
         return "PIPELINED_CGS";
     case SolverType::CGS_CUBLAS:
         return "CGS_CUBLAS";
+    case SolverType::LSGS:
+        return "LSGS";
+    case SolverType::CGSN:
+        return "CGSN";
     case SolverType::INVALID:
         return "INVALID";
     default:
-        printf("Unhandled value for enum class SolverType\n");
-        exit(1);
+        DIE("Unhandled value for enum class SolverType\n");
     }
 }
 
@@ -78,8 +85,7 @@ std::string bootstrap_composition_type_to_string(const BootstrapCompositionType&
     case BootstrapCompositionType::INVALID:
         return "INVALID";
     default:
-        printf("Unhandled value for enum class BootstrapCompositionType\n");
-        exit(1);
+        DIE("Unhandled value for enum class BootstrapCompositionType\n");
     }
 }
 
@@ -102,8 +108,7 @@ std::string match_type_to_string(const MatchType& val)
     case MatchType::INVALID:
         return "INVALID";
     default:
-        printf("Unhandled value for enum class MatchType\n");
-        exit(1);
+        DIE("Unhandled value for enum class MatchType\n");
     }
 }
 
@@ -138,8 +143,7 @@ std::string cycle_type_to_string(const CycleType& val)
     case CycleType::INVALID:
         return "INVALID";
     default:
-        printf("Unhandled value for enum class CycleType\n");
-        exit(1);
+        DIE("Unhandled value for enum class CycleType\n");
     }
 }
 
@@ -162,8 +166,7 @@ std::string coarse_solver_type_to_string(const CoarseSolverType& val)
     case CoarseSolverType::INVALID:
         return "INVALID";
     default:
-        printf("Unhandled value for enum class CoarseSolverType\n");
-        exit(1);
+        DIE("Unhandled value for enum class CoarseSolverType\n");
     }
 }
 
@@ -186,8 +189,7 @@ std::string relax_type_to_string(const RelaxType& val)
     case RelaxType::INVALID:
         return "INVALID";
     default:
-        printf("Unhandled value for enum class RelaxType\n");
-        exit(1);
+        DIE("Unhandled value for enum class RelaxType\n");
     }
 }
 
@@ -222,8 +224,7 @@ std::string preconditioner_type_to_string(const PreconditionerType& val)
     case PreconditionerType::INVALID:
         return "INVALID";
     default:
-        printf("Unhandled value for enum class PreconditionerType\n");
-        exit(1);
+        DIE("Unhandled value for enum class PreconditionerType\n");
     }
 }
 
@@ -235,8 +236,7 @@ int get_int_param(FILE* fp, const char* param)
     char* token;
     void* out = fgets(linebuffer, BUFSIZE, fp);
     if (out == NULL) {
-        printf("ERROR: reading param %s from conf file\n", param);
-        exit(1);
+        DIE("ERROR: reading param %s from conf file\n", param);
     }
     token = strtok(linebuffer, DELIM);
     sscanf(token, "%d", &temp);
@@ -249,8 +249,7 @@ double get_double_param(FILE* fp, const char* param)
     char* token;
     void* out = fgets(linebuffer, BUFSIZE, fp);
     if (out == NULL) {
-        printf("ERROR: reading param %s from conf file\n", param);
-        exit(1);
+        DIE("ERROR: reading param %s from conf file\n", param);
     }
     token = strtok(linebuffer, DELIM);
     sscanf(token, "%lf", &temp);
@@ -261,8 +260,7 @@ std::string get_string_param(FILE* fp, const char* param)
 {
     void* out = fgets(linebuffer, BUFSIZE, fp);
     if (out == NULL) {
-        printf("ERROR: reading param %s from conf file\n", param);
-        exit(1);
+        DIE("ERROR: reading param %s from conf file\n", param);
     }
     std::string token = strtok(linebuffer, DELIM);
     trim(token);
@@ -274,8 +272,7 @@ void parse_properties_file(const char* path, const std::function<void(const std:
     FILE* fp = fopen(path, "r");
 
     if (fp == NULL) {
-        fprintf(stdout, "Error opening setting file %s, errno = %d: %s\n", path, errno, strerror(errno));
-        exit(-1);
+        DIE("Error opening setting file %s, errno = %d: %s\n", path, errno, strerror(errno));
     }
 
     int line = 0;
@@ -305,8 +302,7 @@ void parse_properties_file(const char* path, const std::function<void(const std:
         }
 
         if (equal_index < 0) {
-            fprintf(stdout, "Error reading setting file %s: could not find '=' at line %d\n", path, line);
-            exit(-1);
+            DIE("Error reading setting file %s: could not find '=' at line %d\n", path, line);
         }
 
         std::string key(linebuffer, 0, equal_index);
@@ -319,15 +315,14 @@ void parse_properties_file(const char* path, const std::function<void(const std:
     }
 
     if (ferror(fp)) {
-        fprintf(stdout, "Error reading setting file %s, errno = %d: %s\n", path, errno, strerror(errno));
-        exit(-1);
+        DIE("Error reading setting file %s, errno = %d: %s\n", path, errno, strerror(errno));
     }
 
     fclose(fp);
 }
 
 namespace Params {
-params initFromPropertiesFile(const char* path)
+InputParameters initFromPropertiesFile(const char* path)
 {
     _MPI_ENV;
 
@@ -335,7 +330,7 @@ params initFromPropertiesFile(const char* path)
         std::cout << "Reading setting file " << path << "\n";
     }
 
-    params inparms;
+    InputParameters inparms;
 
     auto handler = [&](const std::string& key, const std::string& value) {
         if (ISMASTER) {
@@ -347,7 +342,7 @@ params initFromPropertiesFile(const char* path)
         } else if (key == "solfile") {
             inparms.solfile = value;
         } else if (key == "solver") {
-            inparms.solver_type = string_to_solver_type(value);
+            inparms.solver_types.push_back(string_to_solver_type(value));
         } else if (key == "itnlim") {
             inparms.itnlim = std::stoi(value);
         } else if (key == "rtol") {
@@ -378,6 +373,8 @@ params initFromPropertiesFile(const char* path)
             inparms.relax_type = string_to_relax_type(value);
         } else if (key == "relaxnumber_coarse") {
             inparms.relaxnumber_coarse = std::stoi(value);
+        } else if (key == "smoothed_prolungator") {
+            inparms.smoothed_prolungator = std::stoi(value);
         } /*else if (key == "coarsesolver_type") {
 
         }*/
@@ -388,7 +385,7 @@ params initFromPropertiesFile(const char* path)
         } else if (key == "l1jacsweeps") {
             inparms.l1jacsweeps = std::stoi(value);
         } else if (key == "sstep") {
-            inparms.sstep = std::stoi(value);
+            inparms.ssteps.push_back(std::stoi(value));
         } else if (key == "stop_criterion") {
             inparms.stop_criterion = std::stoi(value);
         } else if (key == "ru_res") {
@@ -396,18 +393,39 @@ params initFromPropertiesFile(const char* path)
         } else if (key == "rec_res_int") {
             inparms.rec_res_int = std::stoi(value);
         }
+
+        else if (key == "use_chebyshev") {
+            inparms.use_chebyshev = std::stoi(value);
+        } else if (key == "gs_iterations") {
+            inparms.gs_iterations = std::stoi(value);
+        } else if (key == "gs_tol") {
+            inparms.gs_tol = std::stod(value);
+        } else if (key == "power_method_tol") {
+            inparms.power_method_tol = std::stod(value);
+        } else if (key == "power_method_itnlim") {
+            inparms.power_method_itnlim = std::stoi(value);
+        } else if (key == "use_fgs") {
+            inparms.use_fgs = std::stoi(value);
+        }
     };
 
     parse_properties_file(path, handler);
 
+    if (inparms.solver_types.empty()) {
+        inparms.solver_types.push_back(SolverType::CGHS);
+    }
+    if (inparms.ssteps.empty()) {
+        inparms.ssteps.push_back(1);
+    }
+
     return inparms;
 }
 
-params initFromFile(const char* path)
+InputParameters initFromFile(const char* path)
 {
     _MPI_ENV;
 
-    params inparms;
+    InputParameters inparms;
 
     FILE* fp = fopen(path, "r");
 
@@ -415,8 +433,7 @@ params initFromFile(const char* path)
         std::cout << "Reading setting file " << path << "\n";
     }
     if (fp == NULL) {
-        fprintf(stdout, "Error opening setting file %s, errno = %d: %s\n", path, errno, strerror(errno));
-        exit(-1);
+        DIE("Error opening setting file %s, errno = %d: %s\n", path, errno, strerror(errno));
     } else {
         if (ISMASTER) {
             std::cout << "Setting file found!"
@@ -432,7 +449,7 @@ params initFromFile(const char* path)
     if (inparms.solfile == "NONE") {
         inparms.solfile = "";
     }
-    inparms.solver_type = string_to_solver_type(get_string_param(fp, "solver_type"));
+    inparms.solver_types.push_back(string_to_solver_type(get_string_param(fp, "solver_type")));
     inparms.bootstrap_composition_type = string_to_bootstrap_composition_type(get_string_param(fp, "bootstrap_composition_type"));
     inparms.max_hrc = get_int_param(fp, "max_hrc");
     inparms.conv_ratio = get_double_param(fp, "conv_ratio");
@@ -452,7 +469,7 @@ params initFromFile(const char* path)
     inparms.mem_alloc_size = GLOB_MEM_ALLOC_SIZE;
     inparms.error = 0;
 
-    inparms.sstep = get_int_param(fp, "sstep");
+    inparms.ssteps.push_back(get_int_param(fp, "sstep"));
     inparms.stop_criterion = get_int_param(fp, "stop_criterion");
     inparms.ru_res = get_int_param(fp, "ru_res");
     inparms.sprec = string_to_preconditioner_type(get_string_param(fp, "sprec"));
@@ -473,11 +490,11 @@ params initFromFile(const char* path)
     return inparms;
 }
 
-void dump(const params& self, FILE* out)
+void dump(const InputParameters& self, const CurrentParameters& cp, FILE* out)
 {
     fprintf(out, "\trhsfile: %s\n", self.rhsfile.c_str());
     fprintf(out, "\tsolfile: %s\n", self.solfile.c_str());
-    fprintf(out, "\tsolver_type: %s\n", solver_type_to_string(self.solver_type).c_str());
+    fprintf(out, "\tsolver_type: %s\n", solver_type_to_string(cp.solver_type).c_str());
 
     // bcmg
     fprintf(out, "\tbootstrap_composition_type: %s\n", bootstrap_composition_type_to_string(self.bootstrap_composition_type).c_str());
@@ -497,7 +514,7 @@ void dump(const params& self, FILE* out)
     fprintf(out, "\trelaxnumber_coarse: %d\n", self.relaxnumber_coarse);
     fprintf(out, "\tmem_alloc_size: %d\n", self.mem_alloc_size);
     fprintf(out, "\terror: %d\n", self.error);
-    fprintf(out, "\tsstep: %d\n", self.sstep);
+    fprintf(out, "\tsstep: %d\n", cp.sstep);
     fprintf(out, "\tstop_criterion: %d\n", self.stop_criterion);
     fprintf(out, "\tru_res: %d\n", self.ru_res);
     fprintf(out, "\tpreconditioner_type: %s\n", preconditioner_type_to_string(self.sprec).c_str());
@@ -506,4 +523,41 @@ void dump(const params& self, FILE* out)
     fprintf(out, "\tdispnorm: %d\n", self.dispnorm);
 }
 
+}
+
+namespace FemParams {
+FemParameters initFromPropertiesFile(const char* path)
+{
+    _MPI_ENV;
+
+    if (ISMASTER) {
+        std::cout << "Reading fem config file " << path << "\n";
+    }
+
+    FemParameters inparms;
+
+    auto handler = [&](const std::string& key, const std::string& value) {
+        if (ISMASTER) {
+            printf("%20s = %-20s\n", key.c_str(), value.c_str());
+        }
+
+        if (key == "nx") {
+            inparms.nx = std::stoi(value);
+        } else if (key == "ny") {
+            inparms.ny = std::stoi(value);
+        } else if (key == "P") {
+            inparms.P = std::stoi(value);
+        } else if (key == "Q") {
+            inparms.Q = std::stoi(value);
+        } else if (key == "E") {
+            inparms.E = std::stod(value);
+        } else if (key == "nu") {
+            inparms.nu = std::stod(value);
+        }
+    };
+
+    parse_properties_file(path, handler);
+
+    return inparms;
+}
 }

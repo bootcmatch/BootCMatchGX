@@ -11,9 +11,9 @@
 
 /**
  * @brief Host function that launches the CUDA kernel for Cholesky decomposition and solving systems.
- * 
+ *
  * This function calls the `cudacholdcMix` kernel to process multiple systems in parallel. It divides the number of systems (`number`) into blocks, where each block handles a subset of systems. The number of threads per block is defined by `BLOCKDIMENSION`.
- * 
+ *
  * @param number The total number of systems to process.
  * @param n Array containing the size of each system.
  * @param l The lower triangular matrix, which will hold the Cholesky decomposition.
@@ -25,9 +25,9 @@ void choldc(int number, int n[], REALafsai* l, REALafsai* x, int* done, int orow
 
 /**
  * @brief Host function that launches the CUDA kernel for Cholesky decomposition for systems of size 1.
- * 
+ *
  * This function calls the `cudacholdc1` kernel to process the systems where the size is 1. It launches the kernel with a single thread per system, performing the filtering and computation required for the Cholesky decomposition.
- * 
+ *
  * @param number The total number of systems to process (must be of size 1).
  * @param position Array containing the position indices of the systems.
  * @param iat The row pointer array of the matrix.

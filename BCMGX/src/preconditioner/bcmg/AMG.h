@@ -16,8 +16,8 @@ struct hierarchy {
     CSR** A_array; /**< Array of coarse matrices including the fine ones. */
     CSR** P_array; /**< Array of prolongators. */
     CSR** R_array; /**< Array of restrictors. */
-    CSR** R_local_array; /**< Array of local restrictors. */
-    CSR** P_local_array; /**< Array of local prolongators. */
+    // CSR** R_local_array; /**< Array of local restrictors. */
+    // CSR** P_local_array; /**< Array of local prolongators. */
 
     vector<vtype>** D_array; /**< Diagonal of coarse matrices. */
     vector<vtype>** M_array; /**< New diagonal matrix. */
@@ -109,6 +109,7 @@ namespace Hierarchy {
     vtype finalize_cmplx(hierarchy* h);
     vtype finalize_wcmplx(hierarchy* h);
     void printInfo(FILE* fp, hierarchy* h);
+    void printAvgInfo(FILE* fp, hierarchy** H_array, int n_hrc);
 }
 
 /**
@@ -131,7 +132,7 @@ namespace ApplyData {
     applyData* initDefault();
     void free(applyData* ad);
     void print(FILE* fp, applyData* ad);
-    applyData* initByParams(const params& p);
+    applyData* initByParams(const InputParameters& p);
     void setGridSweeps(applyData* ad, int max_level);
 }
 
@@ -143,7 +144,7 @@ namespace BootBuildData {
     bootBuildData* initDefault();
     void free(bootBuildData* ad);
     void print(FILE* fp, bootBuildData* ad);
-    bootBuildData* initByParams(CSR* A, params p);
+    bootBuildData* initByParams(CSR* A, const InputParameters& p);
 }
 
 /**

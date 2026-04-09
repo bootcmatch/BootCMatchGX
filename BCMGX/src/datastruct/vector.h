@@ -3,8 +3,8 @@
  * @brief This file defines structures and utility functions for handling vectors and vector collections,
  *        as well as functions to perform operations such as copying, filling, scaling, and performing basic
  *        linear algebra operations (e.g., dot product, norm, etc.) on vectors.
- * 
- * The code supports operations on vectors stored in device memory (GPU) and host memory. It also includes 
+ *
+ * The code supports operations on vectors stored in device memory (GPU) and host memory. It also includes
  * functionality for vector operations in a distributed context, with MPI support.
  */
 #pragma once
@@ -20,10 +20,10 @@
 /**
  * @struct vector
  * @brief A templated structure representing a sparse vector.
- * 
+ *
  * This structure stores a sparse vector with non-zero values on either the host or device memory. It tracks
  * the number of non-zero entries and whether the vector resides in device memory.
- * 
+ *
  * @tparam T The data type of the vector elements (e.g., `float`, `int`, `double`).
  */
 template <typename T>
@@ -36,10 +36,10 @@ struct vector {
 /**
  * @struct vectordh
  * @brief A structure to manage vector data in both host and device memory.
- * 
+ *
  * This structure is designed to handle vector data that can be accessed in both host and device memory
  * (dual-host). The structure contains two pointers to the vector's data: one for the host and one for the device.
- * 
+ *
  * @tparam T The data type of the vector elements.
  */
 template <typename T>
@@ -52,9 +52,9 @@ struct vectordh {
 /**
  * @struct vectorCollection
  * @brief A structure to represent a collection of vectors.
- * 
+ *
  * This structure holds an array of pointers to individual vectors, enabling operations on multiple vectors at once.
- * 
+ *
  * @tparam T The data type of the vectors in the collection.
  */
 template <typename T>
@@ -66,7 +66,7 @@ struct vectorCollection {
 /**
  * @namespace Vector
  * @brief A namespace containing utility functions for handling vector operations.
- * 
+ *
  * This namespace provides functions to initialize vectors, copy data between host and device, perform basic
  * vector operations such as scaling and dot products, and manage memory allocation and deallocation for vectors.
  */
@@ -74,10 +74,10 @@ namespace Vector {
 
 /**
  * @brief Initializes a vector with the specified size and memory allocation behavior.
- * 
+ *
  * This function creates a vector of size `n` and optionally allocates memory for the vector on either
  * the host or device based on the `on_the_device` flag.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param n The number of non-zero elements in the vector.
  * @param allocate_mem Flag indicating if memory should be allocated for the vector.
@@ -89,9 +89,9 @@ vector<T>* init(unsigned int n, bool allocate_mem, bool on_the_device);
 
 /**
  * @brief Initializes a dual-host vector with the specified size.
- * 
+ *
  * This function creates a vector with the given size that has both host and device memory allocated.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param n The number of elements in the vector.
  * @return A pointer to the initialized dual-host vector.
@@ -99,22 +99,22 @@ vector<T>* init(unsigned int n, bool allocate_mem, bool on_the_device);
 template <typename T>
 vectordh<T>* initdh(int n);
 
- /**
-  * @brief Copies a vector from host to device memory.
-  * 
-  * This function copies the vector data from host memory to device memory.
-  * 
-  * @tparam T The data type of the vector elements.
-  * @param v The vector to be copied to the device.
-  */
+/**
+ * @brief Copies a vector from host to device memory.
+ *
+ * This function copies the vector data from host memory to device memory.
+ *
+ * @tparam T The data type of the vector elements.
+ * @param v The vector to be copied to the device.
+ */
 template <typename T>
 void copydhToD(vectordh<T>* v);
 
 /**
  * @brief Copies a vector from device to host memory.
- * 
+ *
  * This function copies the vector data from device memory to host memory.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param v The vector to be copied to the host.
  */
@@ -123,9 +123,9 @@ void copydhToH(vectordh<T>* v);
 
 /**
  * @brief Frees memory allocated for a dual-host vector.
- * 
+ *
  * This function frees the memory for a dual-host vector, including both host and device memory.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param v The dual-host vector to be freed.
  */
@@ -134,9 +134,9 @@ void freedh(vectordh<T>* v);
 
 /**
  * @brief Fills a vector with a specific value.
- * 
+ *
  * This function sets all elements in a vector to the specified value.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param v The vector to be filled with the value.
  * @param value The value to fill the vector with.
@@ -144,11 +144,14 @@ void freedh(vectordh<T>* v);
 template <typename T>
 void fillWithValue(vector<T>* v, T value);
 
+template <typename T>
+void fillWithRandomValues(vector<T>* v, T min, T max, unsigned long long seed);
+
 /**
  * @brief Fills a portion of a vector with a specific value.
- * 
+ *
  * This function sets a sub-section of a vector to the specified value, defined by the range of indices.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param v The vector to be filled with the value.
  * @param value The value to fill the vector with.
@@ -160,9 +163,9 @@ void fillWithValueWithOff(vector<T>* v, T value, itype, itype);
 
 /**
  * @brief Creates a clone of an existing vector.
- * 
+ *
  * This function creates a new vector that is a copy of the provided vector.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param a The vector to clone.
  * @return A pointer to the cloned vector.
@@ -172,9 +175,9 @@ vector<T>* clone(vector<T>* a);
 
 /**
  * @brief Localizes a global vector by extracting a subset.
- * 
+ *
  * This function extracts a portion of a global vector, based on the local length and shift.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param global_v The global vector to localize.
  * @param local_len The length of the local vector to extract.
@@ -186,9 +189,9 @@ vector<T>* localize_global_vector(vector<T>* global_v, int local_len, int shift)
 
 /**
  * @brief Kernel to copy data between device memory locations.
- * 
+ *
  * This function is a CUDA kernel to copy data from a source vector to a destination vector.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param n The number of elements to copy.
  * @param dest The destination vector.
@@ -199,9 +202,9 @@ __global__ void _copy_kernel(itype n, T* dest, T* source);
 
 /**
  * @brief Copies a vector from host to device memory.
- * 
+ *
  * This function copies a vector from host memory to device memory.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param v The vector to copy to the device.
  * @return A pointer to the copied vector in device memory.
@@ -211,9 +214,9 @@ vector<T>* copyToDevice(vector<T>* v);
 
 /**
  * @brief Copies data from one vector to another, supporting asynchronous execution with streams.
- * 
+ *
  * This function copies data from the source vector to the destination vector, with optional support for CUDA streams.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param dest The destination vector.
  * @param source The source vector.
@@ -224,9 +227,9 @@ void copyTo(vector<T>* dest, vector<T>* source, cudaStream_t stream = 0);
 
 /**
  * @brief Copies a portion of a vector from host to device memory.
- * 
+ *
  * This function copies a subrange of a vector from host memory to device memory.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param dest The destination vector.
  * @param source The source vector.
@@ -238,9 +241,9 @@ void copyToWithOff(vector<T>* dest, vector<T>* source, itype, itype);
 
 /**
  * @brief Copies a vector from device to host memory.
- * 
+ *
  * This function copies a vector from device memory to host memory.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param v The vector to copy to the host.
  * @return A pointer to the copied vector in host memory.
@@ -250,9 +253,9 @@ vector<T>* copyToHost(vector<T>* v_d);
 
 /**
  * @brief Frees memory allocated for a vector.
- * 
+ *
  * This function frees the memory allocated for a vector, either on the host or device.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param v The vector to free.
  */
@@ -261,9 +264,9 @@ void free(vector<T>* v);
 
 /**
  * @brief Frees memory allocated for a vector asynchronously using a CUDA stream.
- * 
+ *
  * This function frees the memory allocated for a vector asynchronously using a specified CUDA stream.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param v The vector to free.
  * @param stream The CUDA stream to use for asynchronous memory freeing.
@@ -273,9 +276,9 @@ void freeAsync(vector<T>* v, cudaStream_t stream);
 
 /**
  * @brief Compares two vectors for equality.
- * 
+ *
  * This function compares two vectors to check if they are equal element-wise.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param a The first vector.
  * @param b The second vector.
@@ -286,9 +289,9 @@ bool equals(vector<T>* a, vector<T>* b);
 
 /**
  * @brief Checks if a vector is filled with zeros.
- * 
+ *
  * This function checks if all elements in a vector are zero.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param a The vector to check.
  * @return `true` if the vector is filled with zeros, `false` otherwise.
@@ -298,9 +301,9 @@ bool is_zero(vector<T>* a);
 
 /**
  * @brief Loads a vector from a file.
- * 
+ *
  * This function loads a vector from a specified file and optionally places it on the device.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param file_name The name of the file containing the vector data.
  * @param on_the_device Flag indicating whether the vector should be loaded into device memory.
@@ -311,9 +314,9 @@ vector<T>* load(const char* file_name, bool on_the_device);
 
 /**
  * @brief Prints a vector to the specified output stream.
- * 
+ *
  * This function prints the elements of a vector to the specified file or the default standard output.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param v The vector to print.
  * @param n The number of elements to print (default is -1, meaning all elements).
@@ -322,11 +325,28 @@ vector<T>* load(const char* file_name, bool on_the_device);
 template <typename T>
 void print(vector<T>* v, int n_ = -1, FILE* fp = stdout);
 
+template <typename T>
+void debug(vector<T>* v, const char* name, FILE* fp = stderr)
+{
+    _MPI_ENV;
+
+    if (myid == 0) {
+        fprintf(fp, "%s\n", name);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    for (int i = 0; i < nprocs; i++) {
+        if (myid == i) {
+            Vector::print(v, -1, fp);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+}
+
 /**
  * @brief Computes the dot product of two vectors.
- * 
+ *
  * This function computes the dot product of two vectors using cuBLAS.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param handle The cuBLAS handle.
  * @param a The first vector.
@@ -340,9 +360,9 @@ T dot(cublasHandle_t handle, vector<T>* a, vector<T>* b, int stride_a = 1, int s
 
 /**
  * @brief Computes the norm (magnitude) of a vector.
- * 
+ *
  * This function computes the Euclidean norm (2-norm) of a vector using cuBLAS.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param handle The cuBLAS handle.
  * @param a The vector to compute the norm of.
@@ -354,9 +374,9 @@ T norm(cublasHandle_t handle, vector<T>* a, int stride_a = 1);
 
 /**
  * @brief Computes the MPI norm (magnitude) of a vector.
- * 
+ *
  * This function computes the norm of a vector across all processes using MPI and cuBLAS.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param handle The cuBLAS handle.
  * @param a The vector to compute the norm of.
@@ -367,9 +387,9 @@ T norm_MPI(cublasHandle_t handle, vector<T>* a);
 
 /**
  * @brief Performs the AXPY operation (y = alpha * x + y).
- * 
+ *
  * This function performs the AXPY operation on two vectors using cuBLAS.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param handle The cuBLAS handle.
  * @param x The vector `x`.
@@ -382,9 +402,9 @@ void axpy(cublasHandle_t handle, vector<T>* x, vector<T>* y, T alpha, int inc = 
 
 /**
  * @brief Performs the AXPY operation (y = alpha * x + y) on a portion of the vectors.
- * 
+ *
  * This function performs the AXPY operation on a portion of the vectors defined by the index range.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param handle The cuBLAS handle.
  * @param x The vector `x`.
@@ -398,9 +418,9 @@ void axpyWithOff(cublasHandle_t handle, vector<T>* x, vector<T>* y, T alpha, ity
 
 /**
  * @brief Scales a vector by a constant factor.
- * 
+ *
  * This function scales the elements of a vector by a scalar multiplier using cuBLAS.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param handle The cuBLAS handle.
  * @param x The vector to scale.
@@ -410,14 +430,23 @@ void axpyWithOff(cublasHandle_t handle, vector<T>* x, vector<T>* y, T alpha, ity
 template <typename T>
 void scale(cublasHandle_t handle, vector<T>* x, T alpha, int inc = 1);
 
+template <typename T>
+void fillWithValues(vector<T>* v, int full_n, std::initializer_list<T> list);
+
+template <typename T>
+vector<T>* createTestVector(int full_n, std::initializer_list<T> values);
+
+template <typename T>
+void debug(vector<T>* v, FILE* out);
+
 /** Collection of vectors */
 namespace Collection {
 
     /**
      * @brief Initializes a collection of vectors.
-     * 
+     *
      * This function initializes a collection of vectors, each with its own memory allocation.
-     * 
+     *
      * @tparam T The data type of the vector elements.
      * @param n The number of vectors in the collection.
      * @return A pointer to the initialized vector collection.
@@ -427,9 +456,9 @@ namespace Collection {
 
     /**
      * @brief Frees a vector collection.
-     * 
+     *
      * This function frees the memory allocated for a collection of vectors.
-     * 
+     *
      * @tparam T The data type of the vector elements.
      * @param c The collection to free.
      */
@@ -440,10 +469,10 @@ namespace Collection {
 
 /**
  * @brief Dumps a vector's contents to a file.
- * 
+ *
  * This function saves the contents of a vector to a file, with the filename formatted according to the
  * provided format string and arguments.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param vec The vector to dump.
  * @param filename_fmt The format string for the filename.
@@ -459,8 +488,7 @@ void dump(vector<T>* vec, const char* filename_fmt, ...)
     va_end(args);
     FILE* fp = fopen(filename, "w");
     if (fp == NULL) {
-        printf("Could not open %s\n", filename);
-        exit(1);
+        DIE("Could not open %s\n", filename);
     }
     Vector::print(vec, -1, fp);
     fclose(fp);
@@ -468,10 +496,10 @@ void dump(vector<T>* vec, const char* filename_fmt, ...)
 
 /**
  * @brief Dumps a portion of a vector's contents to a file.
- * 
+ *
  * This function saves a specified portion of a vector's contents to a file, with the filename formatted
  * according to the provided format string and arguments.
- * 
+ *
  * @tparam T The data type of the vector elements.
  * @param vec The vector to dump.
  * @param n The number of elements to dump.
@@ -488,8 +516,7 @@ void dump(vector<T>* vec, int n, const char* filename_fmt, ...)
     va_end(args);
     FILE* fp = fopen(filename, "w");
     if (fp == NULL) {
-        printf("Could not open %s\n", filename);
-        exit(1);
+        DIE("Could not open %s\n", filename);
     }
     Vector::print(vec, n, fp);
     fclose(fp);

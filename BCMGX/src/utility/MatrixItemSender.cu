@@ -8,7 +8,10 @@ MatrixItemSender::MatrixItemSender(ProcessSelector* processSelector, FILE* debug
 
 int MatrixItemSender::getProcessForItem(int index, matrixItem_t item)
 {
-    return processSelector->getProcessByRow(item.col);
+    // TRACE("Before getProcessByRow([%d,%d])", item.row, item.col);
+    int ret = processSelector->getProcessByRow(item.col);
+    // TRACE("After getProcessByRow([%d,%d])", item.row, item.col);
+    return ret;
 }
 
 matrixItem_t MatrixItemSender::mapItemForProcess(matrixItem_t item, int proc)

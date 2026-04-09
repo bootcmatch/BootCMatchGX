@@ -1,12 +1,12 @@
 /**
  * @file newoverlap.cu
  * @brief Implements the detection and handling of overlapping rows in a sparse matrix (CSR format).
- * 
- * This module identifies rows in a sparse matrix that reference elements outside 
- * a given local domain, distinguishing between "local" and "needy" rows. CUDA 
+ *
+ * This module identifies rows in a sparse matrix that reference elements outside
+ * a given local domain, distinguishing between "local" and "needy" rows. CUDA
  * parallelism is utilized for efficient row classification.
  */
-   
+
 #include "datastruct/CSR.h"
 #include "datastruct/scalar.h"
 #include "datastruct/vector.h"
@@ -18,8 +18,8 @@
 /**
  * @struct Matched
  * @brief Comparator for filtering values in an array.
- * 
- * This struct provides a device-compatible comparison operation 
+ *
+ * This struct provides a device-compatible comparison operation
  * used in filtering operations with the CUB library.
  */
 struct Matched {
@@ -28,7 +28,7 @@ struct Matched {
     /**
      * @brief Constructor for Matched struct.
      * @param compare Value to compare against.
-     */   
+     */
     __host__ __device__ __forceinline__
     Matched(int compare)
         : compare(compare)
@@ -67,7 +67,7 @@ overlappedList* init_overlappedList()
  * @brief Frees an overlappedList structure.
  * @param osl Pointer to the overlappedList structure to be freed.
  */
-   
+
 void free_overlappedList(overlappedList* osl)
 {
     CHECK_DEVICE(cudaStreamDestroy(*osl->local_stream));
@@ -88,9 +88,9 @@ overlappedList* getGlobalOverlappedList()
 
 /**
  * @brief CUDA kernel to find "needy" rows in a sparse matrix.
- * 
+ *
  * Identifies rows that contain column indices outside the local domain.
- * 
+ *
  * @param n Number of rows in the matrix.
  * @param MINI_WARP_SIZE Size of the mini warp for processing.
  * @param A_row Row pointer array of the CSR matrix.
@@ -101,7 +101,7 @@ overlappedList* getGlobalOverlappedList()
  * @param loc_n Output counter for local rows.
  * @param start Start index of the local domain.
  * @param end End index of the local domain.
- */  
+ */
 __global__ void _findNeedyRows(itype n, int MINI_WARP_SIZE, itype* A_row, itype* A_col, itype* needy_rows, itype* loc_rows, itype* needy_n, itype* loc_n, gstype start, gstype end)
 {
     itype tid = blockDim.x * blockIdx.x + threadIdx.x;
@@ -142,12 +142,12 @@ __global__ void _findNeedyRows(itype n, int MINI_WARP_SIZE, itype* A_row, itype*
 
 /**
  * @brief Sets up overlapped regions in a CSR matrix.
- * 
+ *
  * This function categorizes matrix rows into "local" and "needy" categories
  * based on whether they reference external indices.
- * 
+ *
  * @param A Pointer to the CSR matrix.
- */  
+ */
 void setupOverlapped(CSR* A)
 {
     overlappedList* streams = getGlobalOverlappedList();
@@ -172,13 +172,23 @@ void setupOverlapped(CSR* A)
 
     GridBlock gb = gb1d(A->n, BLOCKSIZE, true, warpsize);
     if (A->shrinked_flag == false) {
-        fprintf(stderr, "A should be shrinked in setupOverlapper\n");
-        exit(1);
+        DIE("A should be shrinked in setupOverlapper\n");
     }
-    _findNeedyRows<<<gb.g, gb.b>>>(A->n, warpsize, A->row, A->shrinked_col, needy_rows->val, loc_rows->val, needy_n->val, loc_n->val, A->post_local, A->post_local + A->n);
 
-    itype* _loc_n = Scalar::getvalueFromDevice(loc_n);
-    itype* _needy_n = Scalar::getvalueFromDevice(needy_n);
+    // ===============================================================
+    stype nr_of_cols = A->n;
+    if (A->full_n != A->m) {
+        nr_of_cols = A->m / nprocs;
+        if (myid == nprocs - 1) {
+            nr_of_cols += A->m % nprocs;
+        }
+    }
+    // ===============================================================
+
+    _findNeedyRows<<<gb.g, gb.b>>>(A->n, warpsize, A->row, A->shrinked_col, needy_rows->val, loc_rows->val, needy_n->val, loc_n->val, A->post_local, A->post_local + nr_of_cols);
+
+    itype* _loc_n = Scalar::getValueFromDevice(loc_n);
+    itype* _needy_n = Scalar::getValueFromDevice(needy_n);
 
     os->loc_n = *_loc_n;
     os->needy_n = *_needy_n;
@@ -220,4 +230,3 @@ void setupOverlapped(CSR* A)
     Vector::free(loc_rows);
     Vector::free(needy_rows);
 }
-

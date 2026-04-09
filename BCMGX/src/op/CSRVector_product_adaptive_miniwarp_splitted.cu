@@ -12,7 +12,6 @@
 MPI_Request mpkrequests[MAXNTASKS];
 int mpkntr = -1;
 
-
 /**
  * @brief Synchronizes and updates the global vector based on local and received data.
  *
@@ -98,9 +97,9 @@ vector<vtype>* CSRVector_product_adaptive_miniwarp_splitted(CSR* A, vector<vtype
         printf("ERROR: Myid %d"
                /*", level %d, File %s, Line %d"*/
                ": A->halo.to_receive_n + local_x->n = %d + %d = %d != %lu = A_->m (A->m = %lu, A->n = %d, A->full_n = %lu)\n",
-               myid,
-               /*pico_info.level, pico_info.file, pico_info.line,*/
-               A->halo.to_receive_n, local_x->n, A->halo.to_receive_n + local_x->n, A_->m, A->m, A->n, A->full_n);
+            myid,
+            /*pico_info.level, pico_info.file, pico_info.line,*/
+            A->halo.to_receive_n, local_x->n, A->halo.to_receive_n + local_x->n, A_->m, A->m, A->n, A->full_n);
         printf("[%d] A->halo.to_receive_n = %d, A->halo.to_send_n = %d\n", myid, A->halo.to_receive_n, A->halo.to_send_n);
     }
     assert(A->halo.to_receive_n + local_x->n == A_->m);
@@ -159,8 +158,7 @@ vector<vtype>* CSRVector_product_adaptive_miniwarp_splitted(CSR* A, vector<vtype
                 CSRm::_CSR_vector_mul_mini_warp<0><<<gb.g, gb.b, 0, mpk_stream>>>(n, min_w_size, alpha, beta, A_->val, A_->row, A_->col, x_->val, w_->val);
             }
 #else
-            fprintf(stderr, "NO SUPPORTED!\n");
-            exit(1);
+            DIE("NOT SUPPORTED!\n");
 #endif
         }
         if (hi.to_receive_n) {
@@ -173,8 +171,7 @@ vector<vtype>* CSRVector_product_adaptive_miniwarp_splitted(CSR* A, vector<vtype
                         MPI_Irecv(hi.what_to_receive + (hi.to_receive_spls[t]), hi.to_receive_counts[t], VTYPE_MPI, t, SYNCSOL_TAG_SEND, MPI_COMM_WORLD, mpkrequests + j));
                     j++;
                     if (j == MAXNTASKS) {
-                        fprintf(stderr, "Too many tasks in sync_solution, max is %d\n", MAXNTASKS);
-                        exit(1);
+                        DIE("Too many tasks in sync_solution, max is %d\n", MAXNTASKS);
                     }
                 }
             }

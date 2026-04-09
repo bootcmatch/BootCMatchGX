@@ -4,6 +4,51 @@
 #include "utility/bswhichprocess.h"
 #include "utility/memory.h"
 
+#define DEBUG 0
+
+ProcessSelector::ProcessSelector(gstype full_n, FILE* debug)
+    : debug(debug)
+    , use_row_shift(false)
+{
+    _MPI_ENV;
+
+    stype n = full_n / nprocs;
+
+    this->nprocs = nprocs;
+    this->row_shift = n * (taskmap ? itaskmap[myid] : myid);
+
+    rows_per_process = MALLOC(stype, nprocs);
+    row_shift_per_process = MALLOC(gstype, nprocs);
+    last_row_index_per_process = MALLOC(gstype, nprocs);
+
+    for (int i = 0; i < nprocs; i++) {
+        int mapped_index = taskmap ? itaskmap[i] : i;
+        rows_per_process[i] = n;
+        row_shift_per_process[i] = n * mapped_index;
+    }
+    rows_per_process[nprocs - 1] += full_n % nprocs;
+
+    last_row_index_per_process[0] = rows_per_process[0] - 1;
+    for (int i = 1; i < nprocs; i++) {
+        last_row_index_per_process[i] = last_row_index_per_process[i - 1]
+            + (gstype)rows_per_process[taskmap ? taskmap[i] : i];
+    }
+
+    // for (int i = 0; i < nprocs; i++) {
+    //     int mapped_index = taskmap ? taskmap[i] : i;
+    //     last_row_index_per_process[mapped_index] = row_shift_per_process[mapped_index] + rows_per_process[mapped_index] - 1;
+    // }
+
+    #if DEBUG
+    if (debug) {
+        debugArray("taskmap %d: %d\n", taskmap, nprocs, false, debug);
+        debugArray("rows assigned to process %d: %d\n", rows_per_process, nprocs, false, debug);
+        debugArray("rows shift assigned to process %d: %d\n", row_shift_per_process, nprocs, false, debug);
+        debugArray("last row index assigned to process %d: %d\n", last_row_index_per_process, nprocs, false, debug);
+    }
+    #endif
+}
+
 ProcessSelector::ProcessSelector(CSR* dlA, FILE* debug)
     : debug(debug)
     , use_row_shift(false)
@@ -30,9 +75,11 @@ ProcessSelector::ProcessSelector(CSR* dlA, FILE* debug)
         MPI_COMM_WORLD // Communicator
         ));
 
+    #if DEBUG
     if (debug) {
         debugArray("rows assigned to process %d: %d\n", rows_per_process, nprocs, false, debug);
     }
+    #endif
 
     // ---------------------------------------------------------------------------
     row_shift_per_process = MALLOC(gstype, nprocs);
@@ -46,6 +93,12 @@ ProcessSelector::ProcessSelector(CSR* dlA, FILE* debug)
         MPI_COMM_WORLD // Communicator
         ));
 
+    #if DEBUG
+    if (debug) {
+        debugArray("rows shift assigned to process %d: %d\n", row_shift_per_process, nprocs, false, debug);
+    }
+    #endif
+
     // Compute the last row index assigned to each process.
     // This piece of information will be used to determine which process
     // should receive previously collected data.
@@ -57,9 +110,11 @@ ProcessSelector::ProcessSelector(CSR* dlA, FILE* debug)
             + (gstype)rows_per_process[taskmap ? taskmap[i] : i];
     }
 
+    #if DEBUG
     if (debug) {
         debugArray("last row index assigned to process %d: %d\n", last_row_index_per_process, nprocs, false, debug);
     }
+    #endif
 }
 
 ProcessSelector::~ProcessSelector()
@@ -94,20 +149,18 @@ int ProcessSelector::getProcessByRow(gsstype /*itype*/ row)
 
     if (!(row_shift_per_process[whichproc] <= row && row < row_shift_per_process[whichproc] + rows_per_process[whichproc])) {
         _MPI_ENV;
-        fprintf(stderr,
-            "Process %d: Asking row %ld to process %d, but process %d owns rows [%lu, %lu]\n",
+        if (ISMASTER) {
+            debugArray("rows_per_process[%s] = %u", rows_per_process, nprocs, false, stderr);
+            debugArray("row_shift_per_process[%s] = %lu", row_shift_per_process, nprocs, false, stderr);
+            debugArray("last_row_index_per_process[%s] = %lu", last_row_index_per_process, nprocs, false, stderr);
+        }
+        DIE("Process %d: Asked row %ld to process %d, but process %d owns rows [%lu, %lu]\n",
             myid,
             row,
             whichproc,
             whichproc,
             row_shift_per_process[whichproc],
             row_shift_per_process[whichproc] + rows_per_process[whichproc] - 1);
-        if (ISMASTER) {
-            debugArray("rows_per_process[%s] = %u", rows_per_process, nprocs, false, stderr);
-            debugArray("row_shift_per_process[%s] = %lu", row_shift_per_process, nprocs, false, stderr);
-            debugArray("last_row_index_per_process[%s] = %lu", last_row_index_per_process, nprocs, false, stderr);
-        }
-        exit(1);
     }
 
     return whichproc;

@@ -28,7 +28,7 @@ scalar<T>* init(T val, bool on_the_device)
 template <typename T>
 scalar<T>* copyToDevice(scalar<T>* v)
 {
-    assert(!v->on_the_device);
+    ASSERT(!v->on_the_device);
 
     // alocate scalar on the device memory
     scalar<T>* v_d = init<T>(0, true);
@@ -42,7 +42,7 @@ scalar<T>* copyToDevice(scalar<T>* v)
 template <typename T>
 scalar<T>* copyToHost(scalar<T>* v_d)
 {
-    assert(v_d->on_the_device);
+    ASSERT(v_d->on_the_device);
 
     // alocate scalar on the host memory
     scalar<T>* v = init<T>(0, false);
@@ -85,9 +85,9 @@ void print(scalar<T>* v)
 
 // like copyToHost but with less overhead
 template <typename T>
-T* getvalueFromDevice(scalar<T>* v_d)
+T* getValueFromDevice(scalar<T>* v_d)
 {
-    assert(v_d->on_the_device);
+    ASSERT(v_d->on_the_device);
 
     // alocate scalar on the host memory
     T* v = MALLOC(int, 1, true);
@@ -96,23 +96,41 @@ T* getvalueFromDevice(scalar<T>* v_d)
 
     return v;
 }
+
+template <typename T>
+void getValueFromDevice(scalar<T>* v_d, T* v)
+{
+    ASSERT(v_d->on_the_device);
+
+    // alocate scalar on the host memory
+    cudaError_t err = cudaMemcpy(v, v_d->val, sizeof(T), cudaMemcpyDeviceToHost);
+    CHECK_DEVICE(err);
+}
+
 }
 
 namespace Scalar {
 template scalar<itype>* init<itype>(itype, bool);
 template scalar<vtype>* init<vtype>(vtype, bool);
+template scalar<unsigned int>* init<unsigned int>(unsigned int, bool);
 
 template scalar<itype>* copyToDevice<itype>(scalar<itype>*);
 template scalar<vtype>* copyToDevice<vtype>(scalar<vtype>*);
+template scalar<unsigned int>* copyToDevice<unsigned int>(scalar<unsigned int>*);
 
 template scalar<itype>* copyToHost<itype>(scalar<itype>*);
 template scalar<vtype>* copyToHost<vtype>(scalar<vtype>*);
+template scalar<unsigned int>* copyToHost<unsigned int>(scalar<unsigned int>*);
 
 template void free<itype>(scalar<itype>*);
 template void free<vtype>(scalar<vtype>*);
+template void free<unsigned int>(scalar<unsigned int>*);
 
 template void print<itype>(scalar<itype>*);
 template void print<vtype>(scalar<vtype>*);
+template void print<unsigned int>(scalar<unsigned int>*);
 
-template itype* getvalueFromDevice<itype>(scalar<itype>*);
+template itype* getValueFromDevice<itype>(scalar<itype>*);
+
+template void getValueFromDevice<itype>(scalar<itype>* v_d, itype* v);
 }

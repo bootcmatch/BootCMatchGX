@@ -13,6 +13,7 @@
 // Matrix's global size and row shift
 #define gstype unsigned long
 #define gsstype long int
+#define MPI_GSSTYPE MPI_LONG
 
 #define VTYPE_MPI MPI_DOUBLE
 #define ITYPE_MPI MPI_INT
@@ -47,3 +48,5 @@
 #define NUM_THR 1024
 // TODO should we get the max number of threads from device?
 #define MAX_THREADS 1024
+
+#define USE_TRANSPOSE_LOCAL 1

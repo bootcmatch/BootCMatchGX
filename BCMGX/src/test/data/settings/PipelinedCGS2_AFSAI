@@ -1,0 +1,27 @@
+NONE            % rhs file NONE if not present
+NONE            % sol file NONE if not present
+PIPELINED_CGS   % solver_type: CGHS | FCG | CGS | CGS_CUBLAS | PIPELINED_CGS
+MULTIPLICATIVE  % bootstrap_type: MULTIPLICATIVE (previously 0) | SYMMETRIZED_MULTIPLICATIVE (previously 1) | ADDITIVE (previously 2); NB: This is the composition rule when bootstrap is applied and more than 1 AMG hierarchy is setup
+1               % max_hrc, in bootstrap AMG, max hierarchies; NB: Here put 1 for single AMG component
+0.8             % desired convergence rate of the composite AMG; NB: This is not generally obtained if criterion on max_hrc is reached
+SUITOR          % matchtype: SUITOR (previously 3)
+2               % aggrsweeps; pairs aggregation steps. 0 pairs; 1 double pairs, etc ...
+0               % aggr_type; 0 unsmoothed, 1 smoothed (not yet supported)
+39              % max_levels; max number of levels built for the single hierarchy
+V_CYCLE         % cycle_type: V_CYCLE (previously 0), H_CYCLE (previously 1), W_CYCLE (previously 2), VARIABLE_V_CYCLE (previously 4)
+L1_JACOBI       % coarse_solver: L1_JACOBI (previously 4)
+L1_JACOBI       % relax_type: L1_JACOBI (previously 4)
+20              % relaxnumber_coarse
+0               % coarsesolver_type: 0 Distributed, 1 Replicated. 
+4               % prerelax_sweeps
+4               % postrelax_sweeps
+2000            % itnlim
+1.e-6           % rtol
+2               % CGs sstep (if 0 solves using non sstep CG)
+1               % CGs stop criterion (0 absolute, 1 relative)
+1               % CGs recompute/update residual (0 recompute, 1 update)
+AFSAI           % preconditioner: NONE (prev. 0), L1_JACOBI (prev. 1), BCMG (prev. 2), AFSAI (prev. 3). Note: disabled when "-p 0" is specified in the command line.
+4               % CGs l1-jacobi iterations
+0               % CGs forced residual recomputing interval (if 0 disabled)
+1               % CGs if 1 display norm
+0               % CGs if 1 display detailed timing

@@ -11,7 +11,7 @@
 #include "datastruct/CSR.h"
 #include "datastruct/matrixItem.h"
 #include "utility/assignDeviceToProcess.h"
-#include "utility/distribuite.h"
+#include "utility/distribute.h"
 #include "utility/globals.h"
 #include "utility/handles.h"
 #include "utility/memory.h"
@@ -72,14 +72,12 @@ int main(int argc, char** argv)
             break;
         case 'h':
         default:
-            printf(USAGE, argv[0]);
-            exit(EXIT_FAILURE);
+            DIE(USAGE, argv[0]);
         }
     }
 
     if (mtx_file == NULL || log_file == NULL) {
-        printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        DIE(USAGE, argv[0]);
     }
 
     // Start MPI
@@ -114,8 +112,7 @@ int main(int argc, char** argv)
         sprintf(filename, "%s_%d", log_file, myid);
         f = fopen(filename, "w");
         if (f == NULL) {
-            fprintf(stderr, "Error opening file <%s>\n", filename);
-            exit(EXIT_FAILURE);
+            DIE("Error opening file <%s>\n", filename);
         }
         CSRm::print(dlA, 3, 0, f);
     }
@@ -162,6 +159,7 @@ int main(int argc, char** argv)
     itype missingItemsN = dlA->row_shift;
     itype* d_missingItemsRow = NULL;
     itype* d_missingItemsCol = NULL;
+    gsstype* d_missingItemsCol8 = NULL;
     vtype* d_missingItemsVal = NULL;
 
     size_t missingItemsRowUniqueSize;
@@ -175,6 +173,7 @@ int main(int argc, char** argv)
             0, // row_shift
             &d_missingItemsRow,
             &d_missingItemsCol,
+            &d_missingItemsCol8,
             &d_missingItemsVal,
             false, // Transposed,
             true // Allocate memory
@@ -183,6 +182,7 @@ int main(int argc, char** argv)
         if (f) {
             debugArray("d_missingItemsRow[%d] = %d\n", d_missingItemsRow, missingItemsN + 1, true, f);
             debugArray("d_missingItemsCol[%d] = %d\n", d_missingItemsCol, missingItemsSize, true, f);
+            debugArray("d_missingItemsCol8[%d] = %d\n", d_missingItemsCol8, missingItemsSize, true, f);
             debugArray("d_missingItemsVal[%d] = %lf\n", d_missingItemsVal, missingItemsSize, true, f);
         }
 
@@ -199,6 +199,7 @@ int main(int argc, char** argv)
     itype concatenatedN = dlA->n;
     itype* d_concatenatedRow = dlA->row;
     itype* d_concatenatedCol = dlA->col;
+    gsstype* d_concatenatedCol8 = dlA->col8;
     vtype* d_concatenatedVal = dlA->val;
 
     if (missingItemsN > 0) {
@@ -238,6 +239,16 @@ int main(int argc, char** argv)
             true // Returned array: onDevice
         );
 
+        d_concatenatedCol8 = concatArrays(
+            d_missingItemsCol8, // First array
+            missingItemsSize, // First array: len
+            true, // First array: onDevice
+            dlA->col8, // Second array
+            dlA->nnz, // Second array: len
+            true, // Second array: onDevice
+            true // Returned array: onDevice
+        );
+
         d_concatenatedVal = concatArrays(
             d_missingItemsVal, // First array
             missingItemsSize, // First array: len
@@ -251,11 +262,13 @@ int main(int argc, char** argv)
         if (f) {
             debugArray("d_concatenatedRow[%d] = %d\n", d_concatenatedRow, concatenatedN + 1, true, f);
             debugArray("d_concatenatedCol[%d] = %d\n", d_concatenatedCol, concatenatedNnz, true, f);
+            debugArray("d_concatenatedCol8[%d] = %d\n", d_concatenatedCol8, concatenatedNnz, true, f);
             debugArray("d_concatenatedVal[%d] = %lf\n", d_concatenatedVal, concatenatedNnz, true, f);
         }
 
         CUDA_FREE(d_concatenatedRow);
         CUDA_FREE(d_concatenatedCol);
+        CUDA_FREE(d_concatenatedCol8);
         CUDA_FREE(d_concatenatedVal);
         CUDA_FREE(d_missingItemsRowUnique);
         CUDA_FREE(d_missingItemsRow);

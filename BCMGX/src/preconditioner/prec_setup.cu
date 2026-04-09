@@ -2,13 +2,13 @@
 #include "utility/mpi.h"
 #include "utility/profiling.h"
 
-void prec_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p, PrecOut* out)
+void prec_setup(handles* h, CSR* Alocal, Preconditioner* pr, const InputParameters& p)
 {
     _MPI_ENV;
 
     beginProfiling(__FILE__, __FUNCTION__, __FUNCTION__);
 
-    switch (pr->ptype) {
+    switch (pr->type) {
     case PreconditionerType::NONE:
         break;
 
@@ -25,8 +25,7 @@ void prec_setup(handles* h, CSR* Alocal, cgsprec* pr, const params& p, PrecOut* 
         break;
 
     default:
-        printf("Unhandled value for enum class PreconditionerType in %s().\n", __FUNCTION__);
-        exit(1);
+        DIE("Unhandled value for enum class PreconditionerType in %s().\n", __FUNCTION__);
     }
 
     endProfiling(__FILE__, __FUNCTION__, __FUNCTION__);

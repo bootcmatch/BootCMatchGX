@@ -6,11 +6,11 @@
 
 #include <stdarg.h>
 
-void dump(const char* filename, const params& p, const cgsprec& pr, SolverOut* out)
+void dump(const char* filename, const InputParameters& ip, const CurrentParameters& cp, const Preconditioner& pr, SolverOut* out, bool append)
 {
     _MPI_ENV;
 
-    FILE* fp = fopen(filename, "w");
+    FILE* fp = fopen(filename, append ? "a" : "w");
     if (fp == NULL) {
         printf("File %s opening failed.\n", filename);
     }
@@ -19,30 +19,57 @@ void dump(const char* filename, const params& p, const cgsprec& pr, SolverOut* o
     // Input
     // ---------------------------------------------------------------------
 
-    std::string solver_type = solver_type_to_string(p.solver_type);
+    std::string solver_type = solver_type_to_string(cp.solver_type);
 
     logf(fp, "nprocs                                       : %d\n", nprocs);
     logf(fp, "Solver                                       : %s\n", solver_type.c_str());
 
-    switch (p.solver_type) {
+    switch (cp.solver_type) {
     case SolverType::CGS:
     case SolverType::CGS_CUBLAS:
     case SolverType::PIPELINED_CGS: {
-        logf(fp, "CG Steps                                     : %d\n", p.sstep);
-        logf(fp, "Stop criterion                               : %s\n", p.stop_criterion ? "relative" : "absolute");
-        logf(fp, "Residual                                     : %s\n", p.ru_res ? "updated" : "recomputed");
+        logf(fp, "CG Steps                                     : %d\n", cp.sstep);
+        logf(fp, "Stop criterion                               : %s\n", ip.stop_criterion ? "relative" : "absolute");
+        logf(fp, "Residual                                     : %s\n", ip.ru_res ? "updated" : "recomputed");
+        break;
+    }
+    case SolverType::LSGS: {
+        logf(fp, "CG Steps                                     : %d\n", cp.sstep);
+        logf(fp, "Stop criterion                               : %s\n", ip.stop_criterion ? "relative" : "absolute");
+        logf(fp, "GS iterations                                : %d\n", ip.gs_iterations);
+        logf(fp, "GS tolerance                                 : %g\n", ip.gs_tol);
+        logf(fp, "Chebyshev                                    : %s\n", ip.use_chebyshev ? "yes" : "no");
+        if (ip.use_chebyshev) {
+            logf(fp, "PM iterations limit                          : %d\n", ip.power_method_itnlim);
+            logf(fp, "PM tolerance                                 : %g\n", ip.power_method_tol);
+        }
+        break;
+    }
+    case SolverType::CGSN: {
+        logf(fp, "CG Steps                                     : %d\n", cp.sstep);
+        logf(fp, "Stop criterion                               : %s\n", ip.stop_criterion ? "relative" : "absolute");
+        logf(fp, "FGS                                          : %s\n", ip.use_fgs ? "yes" : "no");
+        if (ip.use_fgs) {
+        	logf(fp, "GS iterations                                : %d\n", ip.gs_iterations);
+        	logf(fp, "GS tolerance                                 : %g\n", ip.gs_tol);
+        }
+        logf(fp, "Chebyshev                                    : %s\n", ip.use_chebyshev ? "yes" : "no");
+        if (ip.use_chebyshev) {
+            logf(fp, "PM iterations limit                          : %d\n", ip.power_method_itnlim);
+            logf(fp, "PM tolerance                                 : %g\n", ip.power_method_tol);
+        }
         break;
     }
     }
 
-    std::string preconditioner_type = preconditioner_type_to_string(p.sprec);
+    std::string preconditioner_type = preconditioner_type_to_string(ip.sprec);
 
-    logf(fp, "Tolerance                                    : %g\n", p.rtol);
+    logf(fp, "Tolerance                                    : %g\n", ip.rtol);
     logf(fp, "Preconditioner                               : %s\n", preconditioner_type.c_str());
 
-    switch (p.sprec) {
+    switch (ip.sprec) {
     case PreconditionerType::L1_JACOBI: {
-        logf(fp, "l1-jacobi sweeps                             : %d\n", p.l1jacsweeps);
+        logf(fp, "l1-jacobi sweeps                             : %d\n", ip.l1jacsweeps);
         break;
     }
     }
@@ -64,14 +91,24 @@ void dump(const char* filename, const params& p, const cgsprec& pr, SolverOut* o
     logf(fp, "Initial residual                             : %.10lf\n", out->del0);
     logf(fp, "Final residual                               : %.10lf\n", out->exitRes);
 
-    switch (p.sprec) {
+    switch (ip.sprec) {
     case PreconditionerType::BCMG: {
-        logf(fp, "Number of hierarchies                        : %d\n", pr.bcmg.boot_amg->n_hrc);
-        logf(fp, "Estimated ratio                              : %f\n", pr.bcmg.boot_amg->estimated_ratio);
-
         AMG::BootBuildData::print(fp, pr.bcmg.bootamg_data);
         AMG::ApplyData::print(fp, pr.bcmg.amg_cycle);
-        AMG::Hierarchy::printInfo(fp, pr.bcmg.H);
+
+        logf(fp, "\nNumber of hierarchies                        : %d\n", pr.bcmg.boot_amg->n_hrc);
+        logf(fp, "Estimated conv. ratio                        : %f\n", pr.bcmg.boot_amg->estimated_ratio);
+
+        boot* boot_amg = pr.bcmg.boot_amg;
+        for (int k = 0; k < boot_amg->n_hrc; k++) {
+            fprintf(fp, "\nHierarchy %d\n", k);
+            AMG::Hierarchy::printInfo(fp, boot_amg->H_array[k]);
+        }
+
+        fprintf(fp, "\n");
+        AMG::Hierarchy::printAvgInfo(fp, boot_amg->H_array, boot_amg->n_hrc);
+
+        // AMG::Hierarchy::printInfo(fp, pr.bcmg.H);
 
         // AMG::Hierarchy::printInfo(stderr, hrrch);
         // Eval::printMetaData("agg;level_number", level, 0);
@@ -91,6 +128,7 @@ void dump(const char* filename, const params& p, const cgsprec& pr, SolverOut* o
 
     // ---------------------------------------------------------------------
 
+    logf(fp, "\n");
     if (fp) {
         fclose(fp);
     }

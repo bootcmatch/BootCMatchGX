@@ -1,9 +1,10 @@
 #include "profiling.h"
 #include "utility/logf.h"
+#include "utility/memory.h"
 #include "utility/mpi.h"
+#include "utility/string.h"
 #include "utility/utils.h"
 
-#include <assert.h>
 #include <map>
 #include <stdlib.h>
 #include <string.h>
@@ -20,12 +21,12 @@
 
 #define MAX_PROF_INFO 90000
 
-/** 
+/**
  * @struct ProfInfo
  * @brief Profiling data structure holding timing and hierarchical information.
- * 
+ *
  * This structure stores detailed timing information for a specific code region.
- * It includes the start and stop times, the hierarchical level of the profile, 
+ * It includes the start and stop times, the hierarchical level of the profile,
  * the parent profile information, and metadata such as the file, function, and label.
  */
 struct ProfInfo {
@@ -50,9 +51,9 @@ struct ProfInfo {
     struct ProfInfo* parent = 0; /**< Parent profile, NULL if no parent */
 
 #if PROFILING_CHRONO
-    /** 
+    /**
      * @brief Calculate the elapsed time in nanoseconds.
-     * 
+     *
      * @return The elapsed time in nanoseconds.
      */
     unsigned long elapsed_time()
@@ -60,9 +61,9 @@ struct ProfInfo {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start).count();
     }
 #else
-    /** 
+    /**
      * @brief Calculate the elapsed time in microseconds.
-     * 
+     *
      * @return The elapsed time in microseconds.
      */
     unsigned long elapsed_time()
@@ -73,7 +74,8 @@ struct ProfInfo {
 };
 
 bool detailed_prof = false;
-ProfInfo prof_info[MAX_PROF_INFO];
+ProfInfo* prof_info = nullptr; //[MAX_PROF_INFO];
+size_t prof_info_capacity = MAX_PROF_INFO;
 size_t prof_info_size = 0;
 ProfInfo* current_prof_info = NULL;
 
@@ -86,14 +88,49 @@ ProfInfo* current_prof_info = NULL;
 #define GET_PROF_TIME(VAR) gettimeofday(&VAR, (struct timezone*)0)
 #endif
 
+void shutdownProfiler()
+{
+    DELETE(prof_info);
+}
+
+void initProfiler()
+{
+    char* ev = getenv("MAX_PROF_INFO");
+    if (ev) {
+        _MPI_ENV;
+        if (sscanf(ev, "%zu", &prof_info_capacity) != 1) {
+            DIE("Error reading MAX_PROF_INFO environment variable.\n");
+        }
+        if (ISMASTER) {
+            fprintf(stderr, "Profiler capacity correctly set to %zu.\n", prof_info_capacity);
+        }
+    }
+
+    prof_info = NEW(ProfInfo, prof_info_capacity);
+    if (atexit(shutdownProfiler)) {
+        DIE("Error registering exit function shutdownProfiler.\n");
+    }
+}
+
 void beginProfiling(const char* file, const char* function, const char* label)
 {
+    if (prof_info == NULL) {
+        initProfiler();
+    }
+
+    if (prof_info_size >= prof_info_capacity) {
+        _MPI_ENV;
+        DIE_MASTER("Exceeded max profiler capacity (%zu). Please, set the environment variable MAX_PROF_INFO to something greater.\n", prof_info_capacity);
+    }
+
     std::string path = current_prof_info
         ? (current_prof_info->path + "::" + label)
         : label;
+
     size_t level = current_prof_info
         ? (current_prof_info->level + 1)
         : 0;
+
     GET_PROF_TIME(prof_info[prof_info_size].start);
     prof_info[prof_info_size].file = file;
     prof_info[prof_info_size].function = function;
@@ -103,7 +140,7 @@ void beginProfiling(const char* file, const char* function, const char* label)
     prof_info[prof_info_size].path = path;
     prof_info[prof_info_size].level = level;
     current_prof_info = &prof_info[prof_info_size];
-    assert(prof_info_size < MAX_PROF_INFO - 1);
+    // ASSERT(prof_info_size < MAX_PROF_INFO - 1);
     prof_info_size++;
 }
 
@@ -113,9 +150,9 @@ void endProfiling(const char* file, const char* function, const char* label)
         printf("__FILE__: %s, current_prof_info->file: %s\n", file, current_prof_info->file);
         printf("__FUNCTION__: %s, current_prof_info->function: %s\n", function, current_prof_info->function);
     }
-    assert(file == current_prof_info->file);
-    assert(function == current_prof_info->function);
-    assert(label == current_prof_info->label);
+    ASSERT(file == current_prof_info->file);
+    ASSERT(function == current_prof_info->function);
+    ASSERT(label == current_prof_info->label);
     // cudaDeviceSynchronize();
     GET_PROF_TIME(current_prof_info->stop);
     current_prof_info = current_prof_info->parent;
@@ -145,7 +182,7 @@ ProfInfoSummary* computeLocalProfilingInfoSummary(size_t* len)
         }
     }
 
-    assert(count.size() == sum.size());
+    ASSERT(count.size() == sum.size());
 
     *len = count.size();
     ProfInfoSummary* ret = new ProfInfoSummary[*len];
@@ -270,7 +307,8 @@ void dumpProfilingInfo(const char* filename, ProfInfoSummary* summary, size_t le
             printf("File %s opening failed.\n", filename);
         }
 
-        unsigned long maxSolveTime = 0UL;
+        // unsigned long maxSolveTime = 0UL;
+        std::vector<std::string> maxSolveTimeStr;
         bool printHeader = true;
         for (auto it = path2proc2index.begin(); it != path2proc2index.end(); it++) {
             const std::string& path = it->first;
@@ -305,7 +343,7 @@ void dumpProfilingInfo(const char* filename, ProfInfoSummary* summary, size_t le
                     firstProc = false;
                     continue;
                 }
-                // assert(strcmp(current.path, recv_data[i].path) == 0);
+                // ASSERT(strcmp(current.path, recv_data[i].path) == 0);
                 if (current.count < minCount) {
                     minCount = current.count;
                 }
@@ -323,8 +361,13 @@ void dumpProfilingInfo(const char* filename, ProfInfoSummary* summary, size_t le
                 sumSum += current.sum;
             }
 
-            if (path == "solve") {
-                maxSolveTime = maxSum;
+            if (/*path == "solve"*/ ends_with(path, "::solve")) {
+                // maxSolveTime = maxSum;
+                if (!IS_ZERO(maxSum)) {
+                    char aux[1024] = { 0 };
+                    sprintf(aux, "TOTAL SOLVE TIME %5s [s]: %lf", path.substr(0, path.find("::solve")).c_str(), (double)maxSum * 1e-9);
+                    maxSolveTimeStr.push_back(aux);
+                }
             }
 
             if (printHeader) {
@@ -353,8 +396,13 @@ void dumpProfilingInfo(const char* filename, ProfInfoSummary* summary, size_t le
             }
         }
 
-        if (!IS_ZERO(maxSolveTime)) {
-            logf(fp, "\nTOTAL SOLVE TIME [s]: %lf\n", (double)maxSolveTime * 1e-9);
+        // if (!IS_ZERO(maxSolveTime)) {
+        //     logf(fp, "\nTOTAL SOLVE TIME [s]: %lf\n", (double)maxSolveTime * 1e-9);
+        // }
+
+        logf(fp, "\n");
+        for (const auto& str : maxSolveTimeStr) {
+            logf(fp, "%s\n", str.c_str());
         }
 
         if (fp) {

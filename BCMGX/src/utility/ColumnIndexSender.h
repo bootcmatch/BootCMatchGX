@@ -15,7 +15,7 @@
  * This class is responsible for determining the process responsible for a given column index
  * and mapping the column index appropriately when sending.
  */
-class ColumnIndexSender : public AbstractSender<itype> {
+class ColumnIndexSender : public AbstractSender<gsstype> {
 private:
     ProcessSelector* processSelector; ///< Pointer to the process selector.
 
@@ -33,7 +33,7 @@ public:
      * @param item The column index item.
      * @return The process ID responsible for the item.
      */
-    int getProcessForItem(int index, itype item);
+    int getProcessForItem(int index, gsstype item);
 
     /**
      * @brief Maps an item to be sent to a specific process.
@@ -41,14 +41,14 @@ public:
      * @param proc The target process.
      * @return The mapped column index for the given process.
      */
-    itype mapItemForProcess(itype item, int proc);
+    gsstype mapItemForProcess(gsstype item, int proc);
 
     /**
      * @brief Converts a column index item to a string.
      * @param item The column index item.
      * @return A string representation of the item.
      */
-    std::string toString(itype item);
+    std::string toString(gsstype item);
 
     /**
      * @brief Debugs an array of items by printing them to the debug file.
@@ -57,7 +57,7 @@ public:
      * @param len The length of the array.
      * @param isOnDevice Whether the array is on a device (GPU).
      */
-    void debugItems(const char* title, itype* arr, size_t len, bool isOnDevice);
+    void debugItems(const char* title, gsstype* arr, size_t len, bool isOnDevice);
 };
 
 /**
@@ -71,7 +71,7 @@ struct ColumnIndexComparator {
      * @param b Second column index.
      * @return True if `a` is less than `b`, false otherwise.
      */
-    __device__ bool operator()(const itype& a, const itype& b) const
+    __device__ bool operator()(const gsstype& a, const gsstype& b) const
     {
         return a < b;
     }
@@ -81,7 +81,7 @@ struct ColumnIndexComparator {
      * @param a The column index.
      * @return The same column index.
      */
-    __device__ itype operator()(const itype& a) const
+    __device__ gsstype operator()(const gsstype& a) const
     {
         return a;
     }

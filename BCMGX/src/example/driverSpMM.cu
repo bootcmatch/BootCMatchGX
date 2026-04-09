@@ -5,7 +5,7 @@
 #include "generator/laplacian.h"
 #include "op/spspmpi.h"
 #include "utility/assignDeviceToProcess.h"
-#include "utility/distribuite.h"
+#include "utility/distribute.h"
 #include "utility/globals.h"
 #include "utility/handles.h"
 #include "utility/memory.h"
@@ -34,8 +34,8 @@ using namespace std;
     "\t-a, --laplacian <SIZE>                      Generate a matrix whose size is <SIZE>^3.\n"                                                                 \
     "\t-t, --time                                  Output the execution time of the application\n\n"
 
-extern vtype* d_temp_storage_max_min;
-extern vtype* min_max;
+// extern vtype* d_temp_storage_max_min;
+// extern vtype* min_max;
 
 enum generator_t {
     LAP_7P,
@@ -105,8 +105,7 @@ CSR* generate_lap3d_local_matrix(generator_t generator, const char* lap_3d_file)
         R = 5 };
     int* parms = read_laplacian_file(lap_3d_file);
     if (nprocs != (parms[P] * parms[Q] * parms[R])) {
-        fprintf(stderr, "Nproc must be equal to P*Q*R\n");
-        exit(EXIT_FAILURE);
+        DIE("Nproc must be equal to P*Q*R\n");
     }
     CSR* Alocal_host = Alocal_host = NULL;
     switch (generator) {
@@ -119,8 +118,7 @@ CSR* generate_lap3d_local_matrix(generator_t generator, const char* lap_3d_file)
         Alocal_host = generateLocalLaplacian3D_27p(parms[nx], parms[ny], parms[nz], parms[P], parms[Q], parms[R]);
         break;
     default:
-        printf("Invalid generator\n");
-        exit(1);
+        DIE("Invalid generator\n");
     }
     snprintf(idstring, sizeof(idstring), "%dx%dx%d", parms[P], parms[Q], parms[R]);
     FREE(parms);
@@ -178,13 +176,11 @@ int main(int argc, char** argv)
             break;
         case 'h':
         default:
-            printf(USAGE, argv[0]);
-            exit(EXIT_FAILURE);
+            DIE(USAGE, argv[0]);
         }
     }
     if (opt == NONE) {
-        printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        DIE(USAGE, argv[0]);
     }
 
     int myid, nprocs, device_id;
@@ -238,11 +234,16 @@ int main(int argc, char** argv)
     CSRm::free(Plocal);
     CSRm::free(APlocal);
 
+    if (SPSP_LIB == SpSpLib::CUSPARSE) {
+        void spgemmcusparseFree();
+        spgemmcusparseFree();
+    }
+
     // if (xsize > 0) {
     CUDA_FREE(xvalstat);
     //}
-    CUDA_FREE(d_temp_storage_max_min);
-    CUDA_FREE(min_max);
+    // CUDA_FREE(d_temp_storage_max_min);
+    // CUDA_FREE(min_max);
 
     MPI_Finalize();
     return 0;

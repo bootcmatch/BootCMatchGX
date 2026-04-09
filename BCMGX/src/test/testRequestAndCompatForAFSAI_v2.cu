@@ -12,7 +12,7 @@
 #include "datastruct/matrixItem.h"
 #include "utility/assignDeviceToProcess.h"
 #include "utility/deviceFilter.h"
-#include "utility/distribuite.h"
+#include "utility/distribute.h"
 #include "utility/globals.h"
 #include "utility/handles.h"
 #include "utility/memory.h"
@@ -139,14 +139,12 @@ int main(int argc, char** argv)
             break;
         case 'h':
         default:
-            printf(USAGE, argv[0]);
-            exit(EXIT_FAILURE);
+            DIE(USAGE, argv[0]);
         }
     }
 
     if (mtx_file == NULL || log_file == NULL) {
-        printf(USAGE, argv[0]);
-        exit(EXIT_FAILURE);
+        DIE(USAGE, argv[0]);
     }
 
     // Start MPI
@@ -181,8 +179,7 @@ int main(int argc, char** argv)
         sprintf(filename, "%s_%d", log_file, myid);
         f = fopen(filename, "w");
         if (f == NULL) {
-            fprintf(stderr, "Error opening file <%s>\n", filename);
-            exit(EXIT_FAILURE);
+            DIE("Error opening file <%s>\n", filename);
         }
         CSRm::print(dlA, 3, 0, f);
     }

@@ -27,12 +27,12 @@
 template <typename T>
 class AbstractSender {
 protected:
-    bool use_row_shift;      ///< Flag indicating whether row shifting is enabled.
-    FILE* debug;             ///< Debug file pointer for logging information.
+    bool use_row_shift; ///< Flag indicating whether row shifting is enabled.
+    FILE* debug; ///< Debug file pointer for logging information.
     MPI_Datatype mpi_data_type; ///< MPI datatype corresponding to T.
 
 public:
-/**
+    /**
      * @brief Constructor for AbstractSender.
      * @param debug Pointer to a debug file for logging.
      * @param mpi_data_type MPI datatype corresponding to T.
@@ -115,18 +115,18 @@ public:
             // Find the process item i must be sent to
             whichproc = getProcessForItem(i, items[i]);
 
+            #if DEBUG
             if (debug) {
                 fprintf(debug, "Element %s should be sent to process %d\n",
                     toString(items[i]).c_str(),
                     whichproc);
             }
+            #endif
 
             // whichproc=taskmap[whichproc];
             if (whichproc == myid) {
-                fprintf(stderr,
-                    "Task %d, unexpected whichproc for item %s\n",
+                DIE("Task %d, unexpected whichproc for item %s\n",
                     myid, toString(items[i]).c_str());
-                exit(EXIT_FAILURE);
             }
 
             sendBuffer->counter[whichproc]++;
@@ -134,9 +134,11 @@ public:
             sendBuffer->size++;
         }
 
+        #if DEBUG
         if (debug) {
             debugArray("items to be sent to process %d = %d\n", sendBuffer->counter, nprocs, false, debug);
         }
+        #endif
 
         // Compute offsets to be used in order to fill sendBuffer->buffer,
         // where items to be sent are grouped by receiver (process id).
@@ -156,9 +158,11 @@ public:
         }
         sendBuffer->counter[nprocs - 1] = 0;
 
+        #if DEBUG
         if (debug) {
             debugArray("send offset for process %d = %d\n", sendBuffer->offset, nprocs, false, debug);
         }
+        #endif
 
         sendBuffer->init();
         for (int i = 0; i < size; i++) {
@@ -167,31 +171,32 @@ public:
             sendBuffer->counter[whichproc]++;
         }
         if (sendBuffer->counter[myid] != 0) {
-            fprintf(stderr, "self sendBuffer->counter should be zero! myid = %d\n", myid);
-            exit(EXIT_FAILURE);
+            DIE("self sendBuffer->counter should be zero! myid = %d\n", myid);
         }
 
+        #if DEBUG
         if (debug) {
             debugItems("sendBuffer->buffer", sendBuffer->buffer, sendBuffer->size, false);
             debugArray("sendBuffer->counter[%d] = %d\n", sendBuffer->counter, nprocs, false, debug);
         }
+        #endif
 
         // Processes must exchange the number of items to be transferred.
         // ---------------------------------------------------------------------------
         if (MPI_Alltoall(sendBuffer->counter, sizeof(itype), MPI_BYTE,
                 rcvBuffer->counter, sizeof(itype), MPI_BYTE, MPI_COMM_WORLD)
             != MPI_SUCCESS) {
-            fprintf(stderr, "Error in MPI_Alltoall, exchanging counters\n");
-            exit(EXIT_FAILURE);
+            DIE("Error in MPI_Alltoall, exchanging counters\n");
         }
         if (rcvBuffer->counter[myid] != 0) {
-            fprintf(stderr, "self rcvBuffer->counter should be zero! %d\n", myid);
-            exit(EXIT_FAILURE);
+            DIE("self rcvBuffer->counter should be zero! %d\n", myid);
         }
 
+        #if DEBUG
         if (debug) {
             debugArray("rcvBuffer->counter[%d] = %d\n", rcvBuffer->counter, nprocs, false, debug);
         }
+        #endif
 
         // Compute offsets to be used in order to fill rcvBuffer->buffer,
         // where items to be sent are grouped by sender (process id).
@@ -202,10 +207,12 @@ public:
             rcvBuffer->size += rcvBuffer->counter[i];
         }
 
+        #if DEBUG
         if (debug) {
             debugArray("rcvBuffer->offset[%d] = %d\n", rcvBuffer->offset, nprocs, false, debug);
             // fprintf(stderr, "pid: %d, sendBuffer->size: %d, rcvBuffer->size: %d\n", myid, sendBuffer->size, rcvBuffer->size);
         }
+        #endif
 
         // Exchange data
         // ---------------------------------------------------------------------------
@@ -221,12 +228,13 @@ public:
                 mpi_data_type,
                 MPI_COMM_WORLD)
             != MPI_SUCCESS) {
-            fprintf(stderr, "Error in MPI_Alltoallv of whichprow rows\n");
-            exit(1);
+            DIE("Error in MPI_Alltoallv of whichprow rows\n");
         }
 
+        #if DEBUG
         if (debug) {
             debugItems("rcvBuffer->buffer", rcvBuffer->buffer, rcvBuffer->size, false);
         }
+        #endif
     }
 };

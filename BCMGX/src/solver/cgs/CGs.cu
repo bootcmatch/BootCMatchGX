@@ -14,15 +14,15 @@
 
 /**
  * @brief Performs the Conjugate Gradient (CG) s-step method for solving linear systems.
- * 
+ *
  * This function implements the CG s-step method as described in the papers by Chronopoulos and Gear. It performs
  * iterative steps to solve the linear system \( A x = b \), using multiple stages (s-steps) of matrix-vector
  * products and preconditioning. The method alternates between using preconditioning and performing matrix-vector
  * products based on the solver's configuration.
- * 
+ *
  * The function iterates until a convergence criterion is met (based on the residual norm) or the maximum number of
  * iterations is reached. The residuals are recomputed periodically depending on the provided settings.
- * 
+ *
  * @param h Handle to CUDA and other resources.
  * @param Alocal The local CSR matrix used in the matrix-vector products.
  * @param rhs_loc The local right-hand side vector.
@@ -30,19 +30,19 @@
  * @param p The parameters that control the behavior of the solver, including solver settings and limits.
  * @param pr Preconditioner storage.
  * @param out The output structure that will store the results, including residual history and final solution.
- * 
+ *
  * @return The return code representing the status of the solver (0 for success, non-zero for failure).
- * 
+ *
  * @note This function performs the iterative s-step CG method, which alternates between matrix-vector products and
  *       preconditioning, depending on the current iteration step and the solver configuration.
  *       The residuals are recalculated at specified intervals based on the provided parameters.
- * 
+ *
  * @details The function follows the s-step approach, where the residual is computed and updated periodically,
  *          alternating between using the preconditioner and performing matrix-vector multiplications. The result
  *          is stored in the provided output structure `out`, and the solver iterates until convergence or the
  *          maximum number of iterations is reached.
  */
-int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_loc, const params& p, cgsprec* pr, SolverOut* out)
+int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_loc, const InputParameters& ip, const CurrentParameters& cp, Preconditioner* pr, SolverOut* out)
 {
     _MPI_ENV;
 
@@ -54,16 +54,16 @@ int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_lo
     stype ln = Alocal->n;
     gstype fn = Alocal->full_n;
 
-    int s = p.sstep;
+    int s = cp.sstep;
 
-    out->resHist = MALLOC(vtype, p.itnlim, true);
+    out->resHist = MALLOC(vtype, ip.itnlim, true);
     // out->solTime = 0.;
 
     vector<vtype>* u1_loc = Vector::init<vtype>(ln, true, true);
     vector<vtype>* r_loc = Vector::init<vtype>(ln, true, true);
 
     vector<vtype>* u_loc = NULL;
-    if (pr->ptype != PreconditionerType::NONE) {
+    if (pr->type != PreconditionerType::NONE) {
         u_loc = Vector::init<vtype>(ln, true, true);
     }
 
@@ -79,7 +79,7 @@ int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_lo
 
     vector<vtype>* sCP1 = NULL;
     vector<vtype>* sCP2 = NULL;
-    if (pr->ptype == PreconditionerType::NONE && p.ru_res) {
+    if (pr->type == PreconditionerType::NONE && ip.ru_res) {
         sCP1 = Vector::init<vtype>(ln * s, true, true);
         sCP2 = Vector::init<vtype>(ln * s, true, true);
 
@@ -114,7 +114,7 @@ int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_lo
     sminusone = -1.0;
     delta0 = 1.0;
 
-    if (p.stop_criterion == 1) {
+    if (ip.stop_criterion == 1) {
         delta0 = Vector::norm_MPI(h->cublas_h, r_loc);
     }
 
@@ -122,9 +122,9 @@ int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_lo
         out->resHist[0] = delta0;
     }
 
-    for (iter = 0; iter < p.itnlim; iter++) {
-        if (iter > 0 && info == 0 && p.ru_res && p.rec_res_int > 0 && iter % p.rec_res_int == 0) {
-            if (p.dispnorm) {
+    for (iter = 0; iter < ip.itnlim; iter++) {
+        if (iter > 0 && info == 0 && ip.ru_res && ip.rec_res_int > 0 && iter % ip.rec_res_int == 0) {
+            if (ip.dispnorm) {
                 printf("recompute residual\n");
             }
 
@@ -136,9 +136,9 @@ int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_lo
         }
 
         if (info == 0 && iter % 2 == 0) { // even
-            mpk(h, Alocal, r_loc, s, sP2, pr, u1_loc, p, out);
+            mpk(h, Alocal, r_loc, s, sP2, pr, u1_loc, ip, cp, out);
 
-            computevm(sP2, s, r_loc, vm, pr->ptype != PreconditionerType::NONE);
+            computevm(sP2, s, r_loc, vm, pr->type != PreconditionerType::NONE);
 
             info = scalarWorkMO(vm, W, alpha, beta, s, iter);
 
@@ -150,15 +150,15 @@ int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_lo
             Vector::copydhToD<vtype>(alpha);
             Vector::copydhToD<vtype>(beta);
 
-            if (p.ru_res && pr->ptype == PreconditionerType::NONE) {
+            if (ip.ru_res && pr->type == PreconditionerType::NONE) {
                 CHECK_DEVICE(cudaMemcpy(sCP2->val, sP2->val + ln, ln * s * sizeof(vtype), cudaMemcpyDeviceToDevice));
             }
 
             // sP2[:,1:s]=sP2[:,1:s]+sP1[:,1:s]*beta, x_loc=x_loc+sP2[:,1:s]*alpha
             mydmmv(sP1->val, ln, s, beta->val, s, s, sP2->val, alpha->val, x_loc->val, sone);
 
-            if (p.ru_res) {
-                if (pr->ptype != PreconditionerType::NONE) {
+            if (ip.ru_res) {
+                if (pr->type != PreconditionerType::NONE) {
                     // sP2[:,s+1:2s]=sP2[:,s+1:2s]+sP1[:,s+1:2s]*beta, r_loc=r_loc-sP2[:,s+1:2s]*alpha
                     mydmmv(sP1->val + (s)*ln, ln, s, beta->val, s, s, sP2->val + (s)*ln, alpha->val, r_loc->val, sminusone);
                 } else {
@@ -173,8 +173,8 @@ int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_lo
         } // end even
 
         if (info == 0 && iter % 2 == 1) { // odd
-            mpk(h, Alocal, r_loc, s, sP1, pr, u1_loc, p, out);
-            computevm(sP1, s, r_loc, vm, pr->ptype != PreconditionerType::NONE);
+            mpk(h, Alocal, r_loc, s, sP1, pr, u1_loc, ip, cp, out);
+            computevm(sP1, s, r_loc, vm, pr->type != PreconditionerType::NONE);
             info = scalarWorkMO(vm, W, alpha, beta, s, iter);
 
             if (info != 0) {
@@ -185,15 +185,15 @@ int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_lo
             Vector::copydhToD<vtype>(alpha);
             Vector::copydhToD<vtype>(beta);
 
-            if (p.ru_res && pr->ptype == PreconditionerType::NONE) {
+            if (ip.ru_res && pr->type == PreconditionerType::NONE) {
                 CHECK_DEVICE(cudaMemcpy(sCP1->val, sP1->val + ln, ln * s * sizeof(vtype), cudaMemcpyDeviceToDevice));
             }
 
             // sP1[:,1:s]=sP1[:,1:s]+sP2[:,1:s]*beta, x_loc=x_loc+sP1[:,1:s]*alpha
             mydmmv(sP2->val, ln, s, beta->val, s, s, sP1->val, alpha->val, x_loc->val, sone);
 
-            if (p.ru_res) {
-                if (pr->ptype != PreconditionerType::NONE) {
+            if (ip.ru_res) {
+                if (pr->type != PreconditionerType::NONE) {
                     // sP1[:,s+1:2s]=sP1[:,s+1:2s]+sP2[:,s+1:2s]*beta, r_loc=r_loc-sP1[:,s+1:2s]*alpha
                     mydmmv(sP2->val + (s)*ln, ln, s, beta->val, s, s, sP1->val + (s)*ln, alpha->val, r_loc->val, sminusone);
                 } else {
@@ -210,13 +210,13 @@ int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_lo
         l2_norm = Vector::norm_MPI(h->cublas_h, r_loc);
 
         if (ISMASTER) {
-            if (p.dispnorm) {
+            if (ip.dispnorm) {
                 printf("%d) r norm: %.10lf\n", iter, l2_norm);
             }
             out->resHist[iter + 1] = l2_norm;
         }
 
-        if (l2_norm < p.rtol * delta0) {
+        if (l2_norm < ip.rtol * delta0) {
             excnlim = 0;
             retval = 0;
             break;
@@ -242,12 +242,12 @@ int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_lo
     Vector::freedh(vm);
     Vector::freedh(alpha);
     Vector::freedh(beta);
-    if (pr->ptype == PreconditionerType::NONE && p.ru_res) {
+    if (pr->type == PreconditionerType::NONE && ip.ru_res) {
         Vector::free(sCP1);
         Vector::free(sCP2);
     }
     Vector::free(u1_loc);
-    if (pr->ptype != PreconditionerType::NONE) {
+    if (pr->type != PreconditionerType::NONE) {
         Vector::free(u_loc);
     }
 
@@ -256,10 +256,10 @@ int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_lo
 
 /**
  * @brief Solves the linear system \( A x = b \) using the Conjugate Gradient (CG) s-step method.
- * 
+ *
  * This function provides an interface to solve a linear system using the CG s-step method. It calls the `cgsstep`
  * function to perform the iterative solver steps and returns the final solution vector.
- * 
+ *
  * @param h Handle to CUDA and other resources.
  * @param Alocal The local CSR matrix used in the matrix-vector products.
  * @param rhs_loc The local right-hand side vector.
@@ -267,19 +267,19 @@ int cgsstep(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x_lo
  * @param p The parameters that control the behavior of the solver, including solver settings and limits.
  * @param pr Preconditioner storage.
  * @param out The output structure that will store the results, including residual history and final solution.
- * 
+ *
  * @return The solution vector after performing the CG s-step method, stored in `out->sol_local`.
- * 
+ *
  * @note The final solution is returned in the output structure `out->sol_local`, and the result of the CG s-step
  *       method is captured in `out->retv`, which indicates the status of the solver.
- * 
+ *
  * @details The function acts as a wrapper to invoke the `cgsstep` function, providing an interface for the user
  *          to solve the system. The initial guess `x0_loc` is updated in-place with the final solution, and the
  *          output structure contains additional information, such as the residual history and exit conditions.
  */
-vector<vtype>* solve_cgs(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x0_loc, cgsprec* pr, const params& p, SolverOut* out)
+vector<vtype>* solve_cgs(handles* h, CSR* Alocal, vector<vtype>* rhs_loc, vector<vtype>* x0_loc, Preconditioner* pr, const InputParameters& ip, const CurrentParameters& cp, SolverOut* out)
 {
-    out->retv = cgsstep(h, Alocal, rhs_loc, x0_loc, p, pr, out);
+    out->retv = cgsstep(h, Alocal, rhs_loc, x0_loc, ip, cp, pr, out);
 
     // To be removed, should be used the solution returned in x0. Instead, should be returned out->retv (or void then check out->retv in the calling function)
     out->sol_local = Vector::init<vtype>(x0_loc->n, true, true);
