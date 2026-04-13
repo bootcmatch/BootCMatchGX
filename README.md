@@ -28,7 +28,7 @@ vol. 34, no. 8, pp. 2365-2376, Aug. 2023, doi: 10.1109/TPDS.2023.3287238.
 -M. Bernaschi, M. G. Carrozzo, A. Celestini, G. Piperno, P. D’Ambra, Communication-reduced Conjugate Gradient Variants for GPU-accelerated Clusters, in the 33rd Euromicro International Conference on
 Parallel, Distributed, and Network-Based Processing (PDP), IEE CS, 2025.
 
--M Bernaschi, A Celestini, P D'Ambra, G Richelli, On the energy efficiency of sparse matrix computations on multi-GPU clusters, arXiv preprint arXiv:2510.02878, 2025. In printing on Future Generation of Computer Systems, 2026.
+-M. Bernaschi, A. Celestini, G. Richelli, P. D'Ambra, On the energy efficiency of sparse matrix computations on multi-GPU clusters, arXiv preprint arXiv:2510.02878, 2025. In printing on Future Generation of Computer Systems, 2026.
 
 -P. D'Ambra, M. Bernaschi, M.G. Carrozzo, S. Thomas, Scalable s-step Preconditioned Conjugate Gradient with Chebyshev Basis and Gauss-Seidel Gram Solve, arXiv preprint arXiv:2603.09790, 2026.
 
