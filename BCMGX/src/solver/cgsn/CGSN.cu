@@ -11,10 +11,12 @@
 #include "utility/profiling.h"
 
 /**
- * @brief Performs an s-step version of the Naumov method for solving linear systems.
+ * @brief Performs an s-step version of the Conjugate Gradient method for solving linear systems as described in the paper:
+ * P. D'Ambra, M. Bernaschi, M.G. Carrozzo, S. Thomas, Scalable s-step Preconditioned Conjugate Gradient with Chebyshev Basis and Gauss-Seidel Gram Solve, 
+ * arXiv preprint arXiv:2603.09790, 2026.
  *
  * It performs a new algorithm wich relies on the iterative Gauss-Seidel method to solve the reduced Gram systems arising
- * from the projection of the original matrix on a s-dimensional Krylov based, in order to find the scalar for updating solution
+ * from the projection of the original matrix on a s-dimensional Krylov based, in order to find the scalars/vectors for updating solution and directions
  * at each iteration. The Gram matrix P^TAP is obtained by using a preconditioned matrix power kernel, to obtain
  * the columns of P, i.e., the vectors of the s-step Krylov basis, and agglomerate all the needed scalar products in order
  * to reduce MPI global reductions.

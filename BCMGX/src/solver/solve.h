@@ -15,7 +15,7 @@ struct Preconditioner;
  * @brief Solves a linear system using the specified solver type.
  *
  * This function selects the appropriate solver (e.g., Conjugate Gradient, Flexible Conjugate Gradient,
- * Pipelined Conjugate Gradient, etc.) based on the solver type specified in the solver parameters.
+ * s-step Conjugate Gradient, etc.) based on the solver type specified in the solver parameters.
  * It invokes the corresponding solver function and returns the solution.
  *
  * @param h Handle to CUDA and other resources.

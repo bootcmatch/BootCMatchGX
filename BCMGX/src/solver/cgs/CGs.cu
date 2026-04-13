@@ -14,6 +14,12 @@
 
 /**
  * @brief Performs the Conjugate Gradient (CG) s-step method for solving linear systems.
+ * This implementation is based on the following references:
+ * - Chronopoulos, A., Gear, C., "s-step Iterative Methods for Symmetric Linear Systems",
+ *   J. Comput. Appl. Math., Vol. 25, N. 2, 1989. pages 153--168.
+ * - Chronopoulos, A., Gear, C., "On the Efficient Implementation of Preconditioned
+ *   s-step Conjugate Gradient Methods on Multiprocessors with Memory Hierarchy",
+ *   Parallel Computing, Vol. 11, N. 1, 1989, pages 37--53.
  *
  * This function implements the CG s-step method as described in the papers by Chronopoulos and Gear. It performs
  * iterative steps to solve the linear system \( A x = b \), using multiple stages (s-steps) of matrix-vector

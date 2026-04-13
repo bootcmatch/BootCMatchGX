@@ -12,7 +12,11 @@
 #define DEBUG 0
 
 /**
- * @brief Solves a linear system using the Conjugate Gradient (CG) method.
+ * @brief Solves a linear system using the classic Conjugate Gradient (CG) method by Hestenef and Stiefel.
+ * This implementation is based on the following references:
+ * Hestenes, M., Stiefel, E., "Methods of Conjugate Gradients for Solving Linear Systems",
+ *   Journal of Research of the National Bureau of Standards, vol. 49, n. 6, 1952, pp. 409-436.
+ * Y. Saad, "Iterative Methods for Sparse Linear Systems", 2nd ed., SIAM, 2003.
  *
  * @param h Handles for CUDA streams and various resources.
  * @param Alocal Pointer to the local sparse matrix in CSR format.

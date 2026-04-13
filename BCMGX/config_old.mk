@@ -72,7 +72,7 @@ endif
 # ===========================================================================
 
 ifeq ($(shell test -d /usr/lib/x86_64-linux-gnu && echo -n yes),yes)
-LIBS += -L/usr/lib/x86_64-linux-gnu
+LIBS += -L/usr/lib/gcc/x86_64-linux-gnu/13
 endif
 
 # ===========================================================================
@@ -85,12 +85,12 @@ endif
 ifeq ($(shell test -d ../../lapack-master && echo -n yes),yes)
 LAPACK_LIB := ../../lapack-master
 endif
-ifeq ($(shell test -d ../../../../InstalledSW/lapack-master && echo -n yes),yes)
-LAPACK_LIB := ../../../../InstalledSW/lapack-master
+ifeq ($(shell test -d ../../../../InstalledSW/LAPACK/lapack-master && echo -n yes),yes)
+LAPACK_LIB := ../../../../InstalledSW/LAPACK/lapack-master
 endif
 
 ifeq ($(LAPACK_LIB),)
-$(info Could not find LAPACK_LIB)
+$(error Could not find LAPACK_LIB: please edit config.mk)
 endif
 
 # ===========================================================================
@@ -99,9 +99,14 @@ endif
 # - Custom
 # ===========================================================================
 
-
+ifeq ($(LAPACK_LIB),)
+# Could not find LAPACK
+SW_USE_LIB := 0
+else
+# LAPACK found
 SW_USE_LIB := 1
-USE_LAPACK := 0
+endif
+
 USE_MKL := 1
 
 # ===========================================================================
@@ -155,39 +160,21 @@ ifeq ($(SW_USE_LIB),1)
 DEFINE += -DSW_USE_LIB
 
 # Use LAPACK+CBLAS: please, adjust the following variables according to your system
-ifeq ($(USE_LAPACK),1)
-$(info Use LAPACK_LIB)
+ifeq ($(LAPACK_LIB),)
+$(error Could not find LAPACK_LIB: please edit config.mk)
+endif
+
 LAPACK_INC = $(LAPACK_LIB)/LAPACKE/include/
 CBLAS_INC = $(LAPACK_LIB)/CBLAS/include/
 CBLAS_LIB = $(LAPACK_LIB)
 
 INCLUDE += -I${LAPACK_INC} -I${CBLAS_INC}
 LIBS    += -L${LAPACK_LIB} -llapack -lrefblas -llapacke -lcblas -lgfortran
-endif
-
-
-ifeq ($(USE_MKL),1)
-$(info Use MKL_LIB)
-# medooza settings
-MKL_DIR     = /opt/share/sdk/intel/oneapi/
-MKL_INCDIR  = $(MKL_DIR)/mkl/2023.2.0/include
-MKL_LIBDIR  = $(MKL_DIR)/mkl/2023.2.0/lib/intel64
-MKL_COMPDIR = $(MKL_DIR)/compiler/2023.2.0/linux/compiler/lib/intel64_lin
-
-DEFINE += -DUSEMKL
-
-INCLUDE += -I$(MKL_INCDIR)
-LIBS    += -L${MKL_LIBDIR} -L$(MKL_COMPDIR) -lmkl_core -lmkl_intel_lp64 -liomp5 -lmkl_intel_thread
-endif
-
 endif #ifeq ($(SW_USE_LIB),1)
 
+#CUDA_MEMCHECK =
 NVCC_OPT = -O3 $(CPP_STD) -DUSE_NVTX -Xcompiler -rdynamic -lineinfo
 CC_OPT = -O3 -rdynamic -lineinfo
-
-
-#NVCC_OPT = -O3 -std=c++14 -DUSE_NVTX -Xcompiler -rdynamic -lineinfo
-#CC_OPT = -O3 -rdynamic -lineinfo
 
 ifeq ($(USE_CUDA_MEMCHECK),1)
 CUDA_MEMCHECK = $(CUDA_DIR)/bin/compute-sanitizer --tool memcheck
@@ -196,6 +183,10 @@ endif
 ifeq ($(USE_CUDA_PROFILER),1)
 CUDA_PROFILER = $(CUDA_DIR)/bin/nsys profile
 endif
+
+$(info    NVCC_OPT is $(NVCC_OPT))
+$(info    NVCC_FLAG is $(NVCC_FLAG))
+$(info    LIBS is $(LIBS))
 
 NPROCS = 4
 

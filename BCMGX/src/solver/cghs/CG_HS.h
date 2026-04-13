@@ -1,11 +1,11 @@
 /**
  * @file CG_HS.h
  * @brief Implementation of the Conjugate Gradient (CG) method using the Hestenes-Stiefel approach.
- *
  * This implementation is based on the following references:
- * - Hestenes, M., Stiefel, E., "Methods of Conjugate Gradients for Solving Linear Systems",
- *   Journal of Research of the National Bureau of Standards, vol. 49, n. 6, 1952, pp. 409-436.
- * - Y. Saad, "Iterative Methods for Sparse Linear Systems", 2nd ed., SIAM, 2003.
+ * Hestenes, M., Stiefel, E., "Methods of Conjugate Gradients for Solving Linear Systems",
+ * Journal of Research of the National Bureau of Standards, vol. 49, n. 6, 1952, pp. 409-436.
+ * Y. Saad, "Iterative Methods for Sparse Linear Systems", 2nd ed., SIAM, 2003.
+ *
  */
 #pragma once
 

@@ -1,3 +1,6 @@
+ /* * This implementation is based on the following references:
+ * - Tiwari, M., Vadhiyar, S., "Pipelined Preconditioned s-step Conjugate Gradient Methods for Distributed Memory Systems"
+ *   Proceedings of IEEE International Conference on Cluster Computing (CLUSTER), 2021, pages 215-225. */
 #include "pipelinedCGs.h"
 
 #include "halo_communication/halo_communication.h"

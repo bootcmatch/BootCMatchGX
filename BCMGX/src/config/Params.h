@@ -19,14 +19,14 @@
  * @brief Enum class to represent the available solvers.
  */
 enum class SolverType {
-    CGHS, /**< Conjugate Gradient with Hybrid Solver */
-    FCG, /**< Flexible Conjugate Gradient */
-    CGS, /**< Conjugate Gradient s-step */
-    PIPELINED_CGS, /**< Pipeline-based Conjugate Gradient s-step */
-    CGS_CUBLAS, /**< Conjugate Gradient s-step using cuBLAS */
-    LSGS, /**< CGS Lanczos with Gauss-Seidel */
-    CGSN, /**< CGS Naumov */
-    INVALID /**< Represents an invalid solver type */
+    CGHS, /** Classic Conjugate Gradient */
+    FCG, /** Flexible Conjugate Gradient */
+    CGS, /** Conjugate Gradient s-step by Chronopoulos and Gear */
+    PIPELINED_CGS, /** Pipeline version Conjugate Gradient s-step */
+    CGS_CUBLAS, /** Conjugate Gradient s-step using cuBLAS */
+    LSGS, /** Lanczos version of CG s-step with Gauss-Seidel */
+    CGSN, /** CG s-step with Chebyshev basis and Gauss-Seidel Gram solve */
+    INVALID /** Represents an invalid solver type */
 };
 
 /**

@@ -1,14 +1,8 @@
 /**
- * @file LSGS.h
+ * @file CGSN.h
  * @brief Implementation of a variant of the Conjugate Gradient (CG) s-step method
  * that also allows for variable preconditioners across iterations.
  *
- * This implementation is based on the following references:
- * - Chronopoulos, A., Gear, C., "s-step Iterative Methods for Symmetric Linear Systems",
- *   J. Comput. Appl. Math., Vol. 25, N. 2, 1989. pages 153--168.
- * - Chronopoulos, A., Gear, C., "On the Efficient Implementation of Preconditioned
- *   s-step Conjugate Gradient Methods on Multiprocessors with Memory Hierarchy",
- *   Parallel Computing, Vol. 11, N. 1, 1989, pages 37--53.
  */
 #pragma once
 
@@ -22,7 +16,7 @@
 /**
  * @brief Solves the linear system \( A x = b \) using the Conjugate Gradient (CG) s-step method.
  *
- * This function provides an interface to solve a linear system using the CG s-step method. It calls the `cgsstep`
+ * This function provides an interface to solve a linear system using the CG s-step method. It calls the `cgsn`
  * function to perform the iterative solver steps and returns the final solution vector.
  *
  * @param h Handle to CUDA and other resources.

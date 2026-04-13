@@ -10,6 +10,12 @@
 
 /**
  * @brief Performs Flexible Conjugate Gradient method (v3) to solve a linear system.
+ * The variant is achieved by reorganizing the main operations to aggregate scalar
+ * products and reduce the required global synchronizations to one.
+ *
+ * This implementation is based on the following references:
+ * - Yvan Notay, Artem Napov, "A massively parallel solver for discrete Poisson-like problems",
+ *   Journal of Computational Physics, Volume 281, 2015, Pages 237-250.
  *
  * This function solves the system \(A x = b\) using the Flexible Conjugate Gradient method,
  * with the option to use a preconditioner. It applies the method iteratively, checking for convergence

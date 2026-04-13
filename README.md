@@ -6,6 +6,11 @@ method for preconditioning algebraic linear systems Ax = b, where A is a symmetr
 of the AMG method, as preconditioner of an efficient version of the Conjugate Gradient Krylov solver, were designed and tuned for hybrid MPI-CUDA programming environments when multiple 
 distributed nodes hosting Nvidia GPUs are available. The current release of the library includes also some communication-reduced variants of Conjugate Gradient solver and a sparse approximate inverse (AFSAI) as possible one-level preconditioner for the various variants of CG method. 
 
+The variants of the communication-reduced Conjugate Gradient solver include:
+1) an implementation of the s-step CG described in the paper: Chronopoulos, A., Gear, C.: On the efficient implementation of preconditioned s-step Conjugate
+Gradient methods on multiprocessors with memory hierarchy. Parallel Computing 11(1), 37–53 (1989) 
+2) an implementation of a new version of Communication-Avoiding CG relying on Chebyshev Krylov basis and iterative Forward Gauss-Seidel as Gram solve. 
+
 This software project has been partially supported by:
 
 -TEXTAROSSA: Towards EXtreme scale Technologies and Accelerators for euROhpc hw/Sw Supercomputing Applications for exascale, a EuroHPC-JU Project, Horizon 2020 Program for Research and Innovation, 
@@ -15,9 +20,13 @@ funded by European Commission (EC), Project ID: 956831.
 
 -ICSC: the Italian Research Center on High-Performance Computing, Big Data and Quantum Computing, funded by MUR - Next Generation EU (NGEU).
 
-Main reference:
+Main references:
 -M. Bernaschi, A. Celestini, F. Vella and P. D'Ambra, A Multi-GPU Aggregation-Based AMG Preconditioner for Iterative Linear Solvers, in IEEE Transactions on Parallel and Distributed Systems, 
 vol. 34, no. 8, pp. 2365-2376, Aug. 2023, doi: 10.1109/TPDS.2023.3287238. 
+-M. Bernaschi, M. G. Carrozzo, A. Celestini, G. Piperno, P. D’Ambra, Communication-reduced Conjugate Gradient Variants for GPU-accelerated Clusters, in the 33rd Euromicro International Conference on
+Parallel, Distributed, and Network-Based Processing (PDP), IEE CS, 2025.
+-M Bernaschi, A Celestini, P D'Ambra, G Richelli, On the energy efficiency of sparse matrix computations on multi-GPU clusters, arXiv preprint arXiv:2510.02878, 2025.
+-P. D'Ambra, M. Bernaschi, M.G. Carrozzo, S. Thomas, Scalable s-step Preconditioned Conjugate Gradient with Chebyshev Basis and Gauss-Seidel Gram Solve, arXiv preprint arXiv:2603.09790, 2026.
 
 ## Installation
 ### Dependencies and Requirements:

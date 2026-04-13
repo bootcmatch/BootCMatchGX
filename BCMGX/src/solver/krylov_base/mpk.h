@@ -15,7 +15,8 @@
  * @brief Performs matrix-vector products with and without preconditioning.
  *
  * This function computes a series of matrix-vector products, alternating between using the
- * preconditioner and applying the matrix multiplication. It handles both single and multiple
+ * preconditioner and applying the matrix multiplication. This type of operation is also known as Matrix Power Kernel.
+ * It handles both single and multiple
  * processes and ensures synchronization where necessary. The computation is done in stages, with
  * matrix-vector products applied to slices of the vector `x_loc` and the results stored in `y_loc`.
  *
