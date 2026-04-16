@@ -27,7 +27,7 @@ int main(int argc, char** argv)
 
     gstype ends[NPROCS];
     gstype mypfirstrow;
-#include "255"
+#include "255.h"
     int uvs = 0;
     long* bitcol = nullptr;
     int bitcolsize = 0;

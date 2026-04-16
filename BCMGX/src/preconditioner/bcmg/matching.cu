@@ -207,7 +207,8 @@ __global__ void _make_w(stype nnz, vtype* val, vtype min)
         return;
     }
     vtype scratch = fabs(val[i]);
-    val[i] = log(scratch ? scratch : SUITOR_EPS / (0.999 * (min)));
+    // val[i] = log(scratch ? scratch : SUITOR_EPS / (0.999 * (min)));
+    val[i] = log((scratch ? scratch : SUITOR_EPS) / (0.999 * min)); // GIACOMO 2026-04-13
 }
 
 CSR* toMaximumProductMatrix(CSR* AH)

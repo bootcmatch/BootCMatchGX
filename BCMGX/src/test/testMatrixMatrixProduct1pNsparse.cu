@@ -12,7 +12,7 @@ int main(int argc, char **argv) {
     char* log_file_name = NULL;
     BCM::init(&argc, &argv, log_file_name);
 
-    ASSERT(argc == 3);
+    ASSERT(argc >= 3);
 
     printf("Reading A from %s\n", argv[1]);
     CSR* A = read_matrix_from_file(argv[1], 0, true);
@@ -29,13 +29,13 @@ int main(int argc, char **argv) {
 
     printf("Computing product\n");
     CSR* AP = nsparseMGPU(A, P, &info);
+    ASSERT(AP->nnz);
 
     CSRm::free(A);
     CSRm::free(P);
 
-    if (SPSP_LIB == SpSpLib::CUSPARSE) {
-        void spgemmcusparseFree();
-        spgemmcusparseFree();
+    if (argc > 3) {
+        CSRm::printMMsimple(AP, argv[3], false);
     }
 
     printf("[DONE]\n");

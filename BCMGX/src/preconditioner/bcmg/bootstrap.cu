@@ -121,6 +121,7 @@ boot* bootstrap(handles* h, Preconditioner* pr, const InputParameters& ip)
 
         if (ISMASTER) {
             printf("Built new hierarchy. Current number of hierarchies:%d\n", num_hrc);
+            AMG::Hierarchy::printInfo(stderr, boot_amg->H_array[num_hrc - 1]);
         }
 
         // TRACE("Before initPreconditionContext");

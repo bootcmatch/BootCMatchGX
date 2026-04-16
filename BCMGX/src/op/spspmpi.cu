@@ -515,6 +515,8 @@ CSR* nsparseMGPU(CSR* Alocal, CSR* Pfull, csrlocinfo* Plocal /*, bool used_by_so
             snprintf(fname, 1024, "%s/%s%s%d_id%d_nprocs%d.mtx", output_dir.c_str(), output_prefix.c_str(), "C", count, myid, nprocs);
             CSRm::printMMsimple(C, fname, false);
         }
+        const int NON_UNIQUE_INDECES = 0;
+        ASSERT(NON_UNIQUE_INDECES);
     }
     #endif
 

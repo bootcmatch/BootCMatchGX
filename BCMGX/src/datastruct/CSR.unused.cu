@@ -1,4 +1,14 @@
+// void CSRm::shift_cols_nogpu(CSR* A, gsstype shift)
+// {
+//     assert(!A->on_the_device);
 
+//     itype n = A->nnz;
+//     for (itype i = 0; i < n; i++) {
+//         gsstype scratch = A->col[i];
+//         scratch += shift;
+//         A->col[i] = scratch;
+//     }
+// }
 
 void CSRm::compare_nnz(CSR* A, CSR* B, int type)
 {

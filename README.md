@@ -57,14 +57,20 @@ make
 
 The process can be customized by editing `BCMGX/config.mk`.
 
+## SpM × SpM
+
+Before using the solver as described in the following section, you should be aware that the library supports different low-level frameworks for computing the SpM × SpM product on a single MPI node. The default framework is cuSPARSE, but the user can switch to another one by setting the environment variable `SPSP_LIB` to `CUSPARSE` (default), `NSPARSE`, or `NSP` (a customized version of NSparse).
+
+When using cuSPARSE to solve large linear systems, the memory footprint can increase rapidly. To reduce memory consumption, you can set the environment variable `CUSPARSE_CHUNK_FRACTION`, which defaults to `0.025`. Lower values reduce memory usage, but at the cost of performance.
+
 ## Solving 
 
 The solver supports different running modes, that can be selected as follows:
 
 ```sh
-Usage: mpirun -np <NPROCS> ./example/driverSolve [--matrix <FILE_NAME> | --laplacian <SIZE> | --laplacian-3d <FILE_NAME>] --settings <FILE_NAME>
+Usage: ./bin/example/driverSolve [--matrix <FILE_NAME> | --laplacian <SIZE> | --laplacian-3d <FILE_NAME> --settings <FILE_NAME>
 
-        You can specify only one out of the three available options: --matrix, --laplacian-3d and --laplacian
+        You can specify only one out of the three available options: --matrix, --laplacian, --laplacian-3d.
 
         -a, --laplacian <SIZE>                      Generate a matrix whose size is <SIZE>^3.
         -B, --out-prefix <STRING>                   Use <PREFIX> when writing additional files to output dir.
@@ -75,6 +81,7 @@ Usage: mpirun -np <NPROCS> ./example/driverSolve [--matrix <FILE_NAME> | --lapla
         -i, --info <FILE_NAME>                      Write info to <FILE_NAME>.
         -l, --laplacian-3d <FILE_NAME>              Read generation parameters from file <FILE_NAME>.
         -m, --matrix <FILE_NAME>                    Read the matrix from file <FILE_NAME>.
+        -r, --rhs <FILE_NAME>                       Read the rhs vector from file <FILE_NAME>.
         -M, --detailed-metrics <FILE_NAME>          Write process-specific detailed profile log to <FILE_NAME><PROC_ID>.
         -o, --out <FILE_NAME>                       Write solution to <FILE_NAME>.
         -O, --out-dir <DIR>                         Write additional files to <DIR>.
@@ -82,6 +89,8 @@ Usage: mpirun -np <NPROCS> ./example/driverSolve [--matrix <FILE_NAME> | --lapla
         -P, --detailed-prof <FILE_NAME>             Write process-specific detailed profile log to <FILE_NAME><PROC_ID>.
         -s, --settings <FILE_NAME>                  Read settings from file <FILE_NAME>.
         -S, --out-suffix <STRING>                   Use <SUFFIX> when writing additional files to output dir.
+        -t, --trace                                 Enable trace.
+        -w, --wait                                  Wait 1 minute before starting.
         -x, --extended-prof                         Write extended profile info inside the info-file.
 ```
 

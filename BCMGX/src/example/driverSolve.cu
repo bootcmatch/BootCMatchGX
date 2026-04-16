@@ -41,6 +41,7 @@
     "\t-i, --info <FILE_NAME>                      Write info to <FILE_NAME>.\n"                                                        \
     "\t-l, --laplacian-3d <FILE_NAME>              Read generation parameters from file <FILE_NAME>.\n"                                 \
     "\t-m, --matrix <FILE_NAME>                    Read the matrix from file <FILE_NAME>.\n"                                            \
+    "\t-r, --rhs <FILE_NAME>                       Read the rhs vector from file <FILE_NAME>.\n"                                        \
     "\t-M, --detailed-metrics <FILE_NAME>          Write process-specific detailed profile log to <FILE_NAME><PROC_ID>.\n"              \
     "\t-o, --out <FILE_NAME>                       Write solution to <FILE_NAME>.\n"                                                    \
     "\t-O, --out-dir <DIR>                         Write additional files to <DIR>.\n"                                                  \
@@ -77,6 +78,7 @@ int main(int argc, char** argv)
         = NONE;
 
     char* input_file = NULL;
+    char* rhs_file = NULL;
 
     generator_t generator = LAP_27P;
     itype n = 0;
@@ -105,6 +107,7 @@ int main(int argc, char** argv)
         { "info", required_argument, NULL, 'i' },
         { "laplacian-3d", required_argument, NULL, 'l' },
         { "matrix", required_argument, NULL, 'm' },
+        { "rhs", required_argument, NULL, 'r' },
         { "detailed-metrics", required_argument, NULL, 'M' },
         { "out", required_argument, NULL, 'o' },
         { "out-dir", required_argument, NULL, 'O' },
@@ -117,7 +120,7 @@ int main(int argc, char** argv)
         { "extended-prof", no_argument, NULL, 'x' },
     };
 
-    while ((ch = getopt_long(argc, argv, "a:B:d:e:f:g:hi:l:m:M:o:O:p:P:s:S:twx", long_options, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "a:B:d:e:f:g:hi:l:m:r:M:o:O:p:P:s:S:twx", long_options, NULL)) != -1) {
         switch (ch) {
         case 'a':
             n = atoi(optarg);
@@ -149,6 +152,9 @@ int main(int argc, char** argv)
         case 'm':
             input_file = strdup(optarg);
             opt = MTX;
+            break;
+        case 'r':
+            rhs_file = strdup(optarg);
             break;
         case 'M':
             detailed_metrics_prefix = optarg;
@@ -282,7 +288,9 @@ int main(int argc, char** argv)
     // Initialize solution
     // -------------------------------------------------------------------------
 
-    vector<vtype>* rhs = Vector::init<vtype>(Alocal->n, true, true);
+    vector<vtype>* rhs = rhs_file
+        ? Vector::load<vtype>(rhs_file, true)
+        : Vector::init<vtype>(Alocal->n, true, true);
     vector<vtype>* x0 = Vector::init<vtype>(Alocal->n, true, true);
 
     // -------------------------------------------------------------------------
@@ -319,12 +327,14 @@ int main(int argc, char** argv)
                     ? solver_type_to_string(st) + std::to_string(sstep)
                     : solver_type_to_string(st);
 
-                #if 0
-                unsigned long long seed = 1234ULL;
-                Vector::fillWithRandomValues(rhs, 0., 1., seed);
-                #else
-                Vector::fillWithValue(rhs, 1.);
-                #endif
+                if (!rhs_file) {
+                    #if 0
+                    unsigned long long seed = 1234ULL;
+                    Vector::fillWithRandomValues(rhs, 0., 1., seed);
+                    #else
+                    Vector::fillWithValue(rhs, 1.);
+                    #endif
+                }
                 Vector::fillWithValue(x0, 0.);
 
                 if (ISMASTER) {

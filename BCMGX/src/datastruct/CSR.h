@@ -407,15 +407,15 @@ vector<vtype>* diag(CSR* A);
  */
 CSR* Transpose_local(CSR* dlA, FILE* f);
 
+// Fix Giacomo 2026-04-15: added optional out_distr parameter.
 /**
  * @brief Transposes a CSR matrix.
  * @param A Pointer to the CSR matrix.
  * @param f File pointer for logging.
- * @param shape Shape of the matrix (default is "Q").
+ * @param out_distr When provided, its fields (row_shift, n) determine the output row distribution.
  * @return Pointer to the transposed CSR matrix.
  */
-CSR* transpose_old(CSR* A, FILE* f, const char* shape = "Q");
-CSR* transpose(CSR* A, FILE* f);
+CSR* transpose(CSR* A, FILE* f, CSR* out_distr = NULL);
 
 bool checkSizeAndShift(CSR *A, CSR *AH);
 

@@ -105,49 +105,6 @@ CSR* CSRm::init(stype n, gstype m, stype nnz, bool allocate_mem, bool on_the_dev
     return A;
 }
 
-// void CSRm::printMM(CSR* A, char* name, bool appendMyIdAndNprocs)
-// {
-//     _MPI_ENV;
-//     CSR* A_ = NULL;
-//     if (A->on_the_device) {
-//         A_ = CSRm::copyToHost(A);
-//     } else {
-//         A_ = A;
-//     }
-
-//     char localname[MAXMATRIXFILENAME];
-//     if (appendMyIdAndNprocs) {
-//         snprintf(localname, sizeof(localname), "%s_%d_%d", name, myid, nprocs);
-//     } else {
-//         snprintf(localname, sizeof(localname), "%s", name);
-//     }
-//     FILE* fp = fopen(localname, "w");
-//     if (fp == NULL) {
-//         DIE("Could not open %s", localname);
-//     }
-//     fprintf(fp, "%%%%MatrixMarket matrix coordinate real general\n");
-//     fprintf(fp, "%d %lu %d "
-//                 "%ld %ld %ld\n",
-//         A_->n, A_->m, A_->nnz,
-//         A_->row_shift, A_->full_n, A_->col_shifted);
-//     for (int i = 0; i < A_->n; i++) {
-//         for (int j = A_->row[i]; j < A_->row[i + 1]; j++) {
-//             // fprintf(fp, "%lu %ld %ld %ld %lf\n",
-//             fprintf(fp, "%lu %ld %lf\n",
-//                 i + 1 + A_->row_shift,
-//                 A_->col[j] + 1 - A_->col_shifted,
-//                 // A_->col8[j],
-//                 // A_->col8[j] + 1 - A_->col_shifted,
-//                 A_->val[j]);
-//         }
-//     }
-//     fclose(fp);
-
-//     if (A->on_the_device) {
-//         CSRm::free(A_);
-//     }
-// }
-
 void CSRm::printMM(CSR* A, FILE* fp)
 {
     _MPI_ENV;
@@ -344,19 +301,6 @@ void CSRm::print(CSR* A, int type, int limit, FILE* fp, bool show_header, bool s
                 next_col++;
             }
 
-            // fprintf(fp, "\t");
-            // for (int j = 0; j < A_->m; j++) {
-            //     int flag = 0, temp = A_->row[i];
-            //     for (temp = A_->row[i]; flag == 0 && (i != (A_->n) - 1 ? temp < (A_->row[i + 1]) : temp < A_->nnz); temp++) {
-            //         if (A_->col[temp] == j) {
-            //             fprintf(fp, "%g ", A_->val[temp]);
-            //             flag = 1;
-            //         }
-            //     }
-            //     if (flag == 0) {
-            //         fprintf(fp, "%g ", 0.0);
-            //     }
-            // }
             fprintf(fp, "\n");
         }
         break;
@@ -754,18 +698,6 @@ void CSRm::shift_cols(CSR* A, gsstype shift)
         }
     }
 }
-
-// void CSRm::shift_cols_nogpu(CSR* A, gsstype shift)
-// {
-//     assert(!A->on_the_device);
-
-//     itype n = A->nnz;
-//     for (itype i = 0; i < n; i++) {
-//         gsstype scratch = A->col[i];
-//         scratch += shift;
-//         A->col[i] = scratch;
-//     }
-// }
 
 __global__ void _prepare_column_ptr(stype A_nrows, itype* A_row, itype* A_col, itype* T_row)
 {
@@ -2063,170 +1995,23 @@ matrixItem_t* CSRm::collectMatrixItems_nogpu(CSR* dlA, FILE* debug, bool useColS
     return d_nnzItems;
 }
 
-// /**
-//  * @param dlA device local A
-//  * @param f process-specific log file
-//  */
-// CSR* CSRm::transpose_old(CSR* dlA, FILE* f, const char* shape)
-// {
-//     assert(dlA->on_the_device);
-
-//     _MPI_ENV;
-
-//     if (f) {
-//         fprintf(f, "[Process %d] n (rows) : %d\n", myid, dlA->n);
-//         fprintf(f, "[Process %d] m (cols) : %lu\n", myid, dlA->m);
-//         fprintf(f, "[Process %d] nnz      : %d\n", myid, dlA->nnz);
-//         fprintf(f, "[Process %d] row shift: %lu\n", myid, dlA->row_shift);
-//     }
-
-//     // Register custom MPI datatypes
-//     // ---------------------------------------------------------------------------
-//     registerMatrixItemMpiDatatypes();
-
-//     // Collect non-zero items in dlA
-//     // ---------------------------------------------------------------------------
-//     matrixItem_t* d_nnzItems = collectMatrixItems(dlA, f, true);
-
-//     // Identify the items to be sent: they are the ones whose column
-//     // index is before the first row index assigned to the process or
-//     // after the last row assigned to the process.
-//     // ---------------------------------------------------------------------------
-
-//     size_t nnzItemsToBeSentSize = 0;
-//     matrixItem_t* d_nnzItemsToBeSent = devicePartition(
-//         d_nnzItems,
-//         dlA->nnz,
-//         MatrixItemColumnIndexOutOfBoundsSelector(
-//             dlA->row_shift,
-//             dlA->row_shift + dlA->n - 1),
-//         &nnzItemsToBeSentSize);
-
-//     if (f) {
-//         fprintf(f, "nnzItemsToBeSent effective size: %zu\n", nnzItemsToBeSentSize);
-//         debugMatrixItems("nnzItemsToBeSent", d_nnzItemsToBeSent, nnzItemsToBeSentSize, true, f);
-//     }
-
-//     // Identify the items not to be requested: they are the ones whose column
-//     // index is between the first row index and the last row index
-//     // assigned to the process.
-//     // ---------------------------------------------------------------------------
-//     matrixItem_t* d_nnzItemsNotToBeSent = d_nnzItemsToBeSent + nnzItemsToBeSentSize;
-//     size_t nnzItemsNotToBeSentSize = dlA->nnz - nnzItemsToBeSentSize;
-
-//     if (f) {
-//         fprintf(f, "nnzItemsNotToBeSent effective size: %zu\n", nnzItemsNotToBeSentSize);
-//         debugMatrixItems("nnzItemsNotToBeSent", d_nnzItemsNotToBeSent, nnzItemsNotToBeSentSize, true, f);
-//     }
-
-//     // Release memory
-//     // ---------------------------------------------------------------------------
-//     CUDA_FREE(d_nnzItems);
-
-//     // Copy data to host in order to perform MPI communication
-//     // ---------------------------------------------------------------------------
-//     matrixItem_t* h_nnzItemsToBeSent = copyArrayToHost(d_nnzItemsToBeSent, nnzItemsToBeSentSize);
-
-//     // Exchange data with other processes
-//     // ---------------------------------------------------------------------------
-//     ProcessSelector processSelector(dlA, f);
-//     MatrixItemSender itemSender(&processSelector, f);
-//     MpiBuffer<matrixItem_t> sendBuffer;
-//     MpiBuffer<matrixItem_t> rcvBuffer;
-//     itemSender.send(h_nnzItemsToBeSent, nnzItemsToBeSentSize,
-//         &sendBuffer, &rcvBuffer);
-
-//     // Now we have all the initially missing values in rcv_buffer and all the
-//     // initially interesting values in nnzItemsNotToBeSent. We need
-//     // to construct a new (transposed) matrix from all those values.
-//     // ---------------------------------------------------------------------------
-//     size_t concatenatedSize = rcvBuffer.size + nnzItemsNotToBeSentSize;
-
-//     matrixItem_t* d_concatenated = concatArrays<matrixItem_t>(
-//         rcvBuffer.buffer, // arr1
-//         rcvBuffer.size, // len1
-//         false, // onDevice1
-//         d_nnzItemsToBeSent + nnzItemsToBeSentSize, // arr2
-//         nnzItemsNotToBeSentSize, // len2
-//         true, // onDevice2
-//         true // retOnDevice
-//     );
-
-//     if (f) {
-//         fprintf(f, "concatenatedItems effective size: %zu\n", concatenatedSize);
-//         debugMatrixItems("concatenatedItems", d_concatenated, concatenatedSize, true, f);
-//     }
-
-//     // Release memory
-//     // ---------------------------------------------------------------------------
-//     CUDA_FREE(d_nnzItemsToBeSent);
-//     FREE(h_nnzItemsToBeSent);
-
-//     // Sort items by col, row (pratically: already transposed)
-//     // ---------------------------------------------------------------------------
-//     deviceSort<matrixItem_t, gstype, MatrixItemTransposedComparator>(d_concatenated, concatenatedSize, MatrixItemTransposedComparator(dlA->full_n));
-
-//     if (f) {
-//         debugMatrixItems("sortedItems", d_concatenated, concatenatedSize, true, f);
-//     }
-
-//     if (!concatenatedSize) {
-//         fprintf(f ? f : stderr, "concatenatedSize in process %d is 0. Row shift: %ld, n: %d\n", myid, dlA->row_shift, dlA->n);
-//     }
-
-//     // Create new CSR matrix
-//     // ---------------------------------------------------------------------------
-//     bool is_rectangular = !strncasecmp("R", shape, 1);
-//     CSR* d_transposed = CSRm::init(
-//         is_rectangular ? dlA->m : dlA->n, // Nr of rows,
-//         is_rectangular ? dlA->full_n : dlA->full_n, // Nr of columns,
-//         concatenatedSize, // nnz
-//         true, // Allocate memory
-//         true, // On the device
-//         false, // Is symmetric?
-//         is_rectangular ? dlA->m : dlA->full_n,
-//         dlA->row_shift);
-
-//     // Fill CSR
-//     // ---------------------------------------------------------------------------
-//     fillCsrFromMatrixItems(
-//         d_concatenated,
-//         concatenatedSize,
-//         d_transposed->n,
-//         d_transposed->row_shift,
-//         &(d_transposed->row),
-//         &(d_transposed->col),
-//         &(d_transposed->col8),
-//         &(d_transposed->val),
-//         true, // Transposed
-//         false // Allocate memory
-//     );
-
-//     if (f) {
-//         debugArray("d_transposed->row[%d] = %d\n", d_transposed->row, d_transposed->n + 1, true, f);
-//         debugArray("d_transposed->col[%d] = %d\n", d_transposed->col, d_transposed->nnz, true, f);
-//         debugArray("d_transposed->col8[%d] = %ld\n", d_transposed->col8, d_transposed->nnz, true, f);
-//         debugArray("d_transposed->val[%d] = %lf\n", d_transposed->val, d_transposed->nnz, true, f);
-//     }
-
-//     CUDA_FREE(d_concatenated);
-
-//     if (d_transposed->row_shift) {
-//         CSRm::shift_cols(d_transposed, -d_transposed->row_shift);
-//         d_transposed->col_shifted = -d_transposed->row_shift;
-//     }
-
-//     return d_transposed;
-// }
-
 // #undef DEBUG
 // #define DEBUG 1
 
+// Fix Giacomo 2026-04-15: added optional out_distr parameter.
+// When out_distr is provided, its (row_shift, n) determine the output row distribution
+// and its per-process row counts are gathered via MPI_Allgather for correct item routing.
+// This is needed when the SUITOR matching produces a non-uniform coarse distribution:
+// the original uniform estimate (full_n/nprocs * myid) can be off-by-one, causing items
+// to be routed to the wrong process and leading to OOB accesses or solver divergence.
 /**
- * @param dlA device local A
- * @param f process-specific log file
+ * @brief Transposes a CSR matrix.
+ * @param A Pointer to the CSR matrix.
+ * @param f File pointer for logging.
+ * @param out_distr When provided, its fields (row_shift, n) determine the output row distribution.
+ * @return Pointer to the transposed CSR matrix.
  */
- CSR* CSRm::transpose(CSR* dlA, FILE* f)
+ CSR* CSRm::transpose(CSR* dlA, FILE* f, CSR* out_distr)
  {
      assert(dlA->on_the_device);
  
@@ -2235,11 +2020,24 @@ matrixItem_t* CSRm::collectMatrixItems_nogpu(CSR* dlA, FILE* debug, bool useColS
      // Compute transposed matrix properties
      // ---------------------------------------------------------------------------
      gstype full_n = dlA->m;
-     stype n = full_n / nprocs;
      gstype m = dlA->full_n;
-     gstype row_shift = n * (taskmap ? itaskmap[myid] : myid);
-     if (myid == nprocs - 1) {
-        n += full_n % nprocs;
+     gstype row_shift;
+     stype n;
+     if (out_distr != NULL) {
+         // Fix Giacomo 2026-04-15: use the actual distribution of the output matrix
+         // (e.g. the coarse matrix built by SUITOR matching) instead of the uniform
+         // estimate. The same distribution is also passed to ProcessSelector below so
+         // that each matrix item is routed to the process that actually owns its output
+         // row, even when the coarse distribution is non-uniform.
+         row_shift = out_distr->row_shift;
+         n = out_distr->n;
+     } else {
+         // Fall back to uniform distribution estimate
+         n = full_n / nprocs;
+         row_shift = n * (taskmap ? itaskmap[myid] : myid);
+         if (myid == nprocs - 1) {
+             n += full_n % nprocs;
+         }
      }
      
      #if DEBUG
@@ -2311,7 +2109,13 @@ matrixItem_t* CSRm::collectMatrixItems_nogpu(CSR* dlA, FILE* debug, bool useColS
  
      // Exchange data with other processes
      // ---------------------------------------------------------------------------
-     ProcessSelector processSelector(full_n, f);
+     // Fix Giacomo 2026-04-15: when out_distr is provided, build ProcessSelector from it
+     // (using MPI_Allgather of its actual per-process row counts) instead of from full_n
+     // (which assumes a uniform distribution). This ensures each item is sent to the
+     // process that truly owns its output row under the SUITOR coarse distribution.
+     ProcessSelector processSelector = out_distr ? ProcessSelector(out_distr, f)
+                                                 : ProcessSelector(full_n, f);
+     //  ProcessSelector processSelector(full_n, f);
      MatrixItemSender itemSender(&processSelector, f);
      MpiBuffer<matrixItem_t> sendBuffer;
      MpiBuffer<matrixItem_t> rcvBuffer;
@@ -2362,17 +2166,6 @@ matrixItem_t* CSRm::collectMatrixItems_nogpu(CSR* dlA, FILE* debug, bool useColS
  
      // Create new CSR matrix
      // ---------------------------------------------------------------------------
-    //  bool is_rectangular = !strncasecmp("R", shape, 1);
-    //  CSR* d_transposed = CSRm::init(
-    //      is_rectangular ? dlA->m : dlA->n, // Nr of rows,
-    //      is_rectangular ? dlA->full_n : dlA->full_n, // Nr of columns,
-    //      concatenatedSize, // nnz
-    //      true, // Allocate memory
-    //      true, // On the device
-    //      false, // Is symmetric?
-    //      is_rectangular ? dlA->m : dlA->full_n,
-    //      dlA->row_shift);
-
     CSR* d_transposed = CSRm::init(
         n, // Nr of rows,
         m, // Nr of columns,
@@ -2589,6 +2382,7 @@ void check_and_fix_order(CSR* A)
 
     itype* Arow = A->row;
     gsstype* Acol8 = A->col8;
+    itype* Acol = A->col;        // Giacomo: 2026-04-13
     vtype* Aval = A->val;
     itype prev;
     int wrongo;
@@ -2605,6 +2399,12 @@ void check_and_fix_order(CSR* A)
         }
         if (wrongo) {
             bubbleSort(&Acol8[Arow[i]], &Aval[Arow[i]], (Arow[i + 1] - Arow[i]));
+            // Giacomo: 2026-04-13 (begin)
+            // sincronizza col da col8 ordinata
+            for (int j = Arow[i]; j < Arow[i + 1]; j++) {
+                Acol[j] = (itype)Acol8[j];
+            }
+            // Giacomo: 2026-04-13 (end)
         }
     }
 }
@@ -2845,6 +2645,7 @@ CSR* readMTXDouble(const char* file_name)
     }
     for (k = 0; k < num_nonzeros; k++) {
         A->col[k] = matrix_j[k];
+        A->col8[k] = (gsstype)matrix_j[k]; // GIACOMO 2026-04-13
     }
 
     FREE(matrix_cooi);

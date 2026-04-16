@@ -1,5 +1,6 @@
 #include "datastruct/CSR.h"
 #include "datastruct/scalar.h"
+#include "utility/col8.h"
 #include "utility/cudamacro.h"
 #include "utility/memory.h"
 #include "utility/mpi.h"
@@ -353,6 +354,7 @@ CSR* split_matrix_mpi(CSR* A)
     CSR* Alocal = split_matrix_mpi_host(A);
     CSR* d_Alocal = CSRm::copyToDevice(Alocal);
     CSRm::free(Alocal);
+    col2col8(d_Alocal->col, d_Alocal->col8, d_Alocal->nnz); // Giacomo 2026-04-13: populate col8 from col after device copy
     return d_Alocal;
 }
 
