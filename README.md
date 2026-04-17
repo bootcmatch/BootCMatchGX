@@ -28,7 +28,7 @@ vol. 34, no. 8, pp. 2365-2376, Aug. 2023, doi: 10.1109/TPDS.2023.3287238.
 -M. Bernaschi, M. G. Carrozzo, A. Celestini, G. Piperno, P. D’Ambra, Communication-reduced Conjugate Gradient Variants for GPU-accelerated Clusters, in the 33rd Euromicro International Conference on
 Parallel, Distributed, and Network-Based Processing (PDP), IEE CS, 2025.
 
--M. Bernaschi, A. Celestini, G. Richelli, P. D'Ambra, On the Energy Efficiency of Sparse Matrix Computations on multi-GPU Clusters, arXiv preprint arXiv:2510.02878, 2025. In printing on Future Generation of Computer Systems, 2026.
+-M. Bernaschi, A. Celestini, G. Richelli, P. D'Ambra, On the Energy Efficiency of Sparse Matrix Computations on multi-GPU Clusters, arXiv preprint arXiv:2510.02878, 2025. In printing on Future Generation Computer Systems, 2026.
 
 -P. D'Ambra, M. Bernaschi, M.G. Carrozzo, S. Thomas, Scalable s-step Preconditioned Conjugate Gradient with Chebyshev Basis and Gauss-Seidel Gram Solve, arXiv preprint arXiv:2603.09790, 2026.
 
@@ -59,7 +59,7 @@ The process can be customized by editing `BCMGX/config.mk`.
 
 ## SpM × SpM
 
-Before using the solver as described in the following section, you should be aware that the library supports different low-level frameworks for computing the SpM × SpM product on a single MPI node. The default framework is cuSPARSE, but the user can switch to another one by setting the environment variable `SPSP_LIB` to `CUSPARSE` (default), `NSPARSE`, or `NSP` (a customized version of NSparse).
+Before using the solver as described in the following section, you should be aware that the library supports different low-level frameworks for computing the SpMM × SpMM product on a single MPI node. The default framework is cuSPARSE, but the user can switch to another one by setting the environment variable `SPSP_LIB` to `CUSPARSE` (default), `NSPARSE`, or `NSP` (a customized version of NSparse).
 
 When using cuSPARSE to solve large linear systems, the memory footprint can increase rapidly. To reduce memory consumption, you can set the environment variable `CUSPARSE_CHUNK_FRACTION`, which defaults to `0.025`. Lower values reduce memory usage, but at the cost of performance.
 
