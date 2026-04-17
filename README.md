@@ -39,12 +39,13 @@ The software requires:
 * GCC >= 8.0
 * CUDA >= 12.3
 * **[NSPARSE](https://github.com/EBD-CREST/nsparse)**: We included in this repository a slightly modified version of *NSPARSE*. This is located in *EXTERNAL*
-* **[LAPACK][https://www.netlib.org/lapack/]** >= 3.12.0
+* **[LAPACK][https://www.netlib.org/lapack/]** >= 3.12.0 (or an equivalent implementation such as Intel MKL)
 
 ### Lapack
 
 Please, download and compile LAPACK before going on.
 `BCMGX/Makefile` expects to find directory `../../../lapack-master`, but it can be changed by editing `BCMGX/config.mk`.
+Alternatively, an optimized implementation such as Intel MKL can be used instead of a standalone LAPACK installation, by properly configuring the library paths and linker flags in config.mk.
 
 ### Compilation
 
