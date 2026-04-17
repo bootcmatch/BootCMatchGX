@@ -58,9 +58,9 @@ make
 
 The process can be customized by editing `BCMGX/config.mk`.
 
-## SpM × SpM
+## SpMM product
 
-Before using the solver as described in the following section, you should be aware that the library supports different low-level frameworks for computing the SpMM × SpMM product on a single MPI node. The default framework is cuSPARSE, but the user can switch to another one by setting the environment variable `SPSP_LIB` to `CUSPARSE` (default), `NSPARSE`, or `NSP` (a customized version of NSparse).
+Before using the solver as described in the following section, you should be aware that the library supports different low-level frameworks for computing the SpMM product (Sparse Matrix-Sparse Matrix multiplication) on a single MPI node. The default framework is cuSPARSE, but the user can switch to another one by setting the environment variable `SPSP_LIB` to `CUSPARSE` (default), `NSPARSE`, or `NSP` (a customized version of NSparse).
 
 When using cuSPARSE to solve large linear systems, the memory footprint can increase rapidly. To reduce memory consumption, you can set the environment variable `CUSPARSE_CHUNK_FRACTION`, which defaults to `0.025`. Lower values reduce memory usage, but at the cost of performance.
 
