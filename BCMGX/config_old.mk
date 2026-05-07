@@ -119,11 +119,11 @@ CPP_STD         = -std=c++17
 
 CC = gcc
 NVCC = $(CUDA_DIR)/bin/nvcc
-NVCC_FLAG = -DOMPI_SKIP_MPICXX $(CPP_STD) --extended-lambda
+NVCC_FLAG = -DOMPI_SKIP_MPICXX $(CPP_STD) --extended-lambda # -Xptxas=-v
 GPU_ARCH = -arch=$(CUDA_GPU_ARCH) -m64
 
 LIBS += -lcuda -lcudart -lcublas -lcusolver -lcurand -L$(MPI_DIR)/lib -lmpi -lnvToolsExt -lnvidia-ml -lcusparse #-lpthread
-INCLUDE = -Isrc  -I$(MPI_INCLUDE_DIR) -I$(NSPARSE_PATH)/inc -I$(NSP_PATH)/inc -Iinclude
+INCLUDE = -Isrc -Isrc/nsp -I$(MPI_INCLUDE_DIR) -I$(NSPARSE_PATH)/inc -I$(NSP_PATH) -Iinclude
 DEFINE = #-DGENERAL_TRANSPOSE #-DDETAILED_TIMING
 
 export LD_LIBRARY_PATH+=$(MPI_DIR)/lib
@@ -131,7 +131,7 @@ export LD_LIBRARY_PATH+=$(MPI_DIR)/lib
 NSPARSE_PATH = ../EXTERNAL/nsparse-master/cuda-c
 NSPARSE_GPU_ARCH = $(GPU_ARCH)
 
-NSP_PATH = ../EXTERNAL/nsp-main/nsp
+NSP_PATH = ../EXTERNAL/nsp-new
 NSP_GPU_ARCH = $(GPU_ARCH)
 
 # NUMDIFF = /home/giacomop/numdiff-5.9.0/numdiff

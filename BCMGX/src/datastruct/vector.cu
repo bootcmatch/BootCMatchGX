@@ -712,6 +712,7 @@ template void freedh<vtype>(vectordh<vtype>*);
 
 template void fillWithValue<itype>(vector<itype>*, itype);
 template void fillWithValue<vtype>(vector<vtype>*, vtype);
+template void fillWithValue<gstype>(vector<gstype>*, gstype);
 template void fillWithRandomValues<vtype>(vector<vtype>* v, vtype min, vtype max, unsigned long long seed);
 template void fillWithValueWithOff<vtype>(vector<vtype>*, vtype, itype, itype);
 

@@ -23,6 +23,7 @@ struct hierarchy {
     vector<vtype>** M_array; /**< New diagonal matrix. */
 
     itype num_levels; /**< Number of levels in the hierarchy. */
+    long* global_nnz_array; /**< Global nnz per level, collected during finalize_cmplx. */
     vtype op_cmplx; /**< Operator complexity for V-cycle. */
     vtype op_wcmplx; /**< Operator complexity for W-cycle. */
     vtype avg_cratio; /**< Average coarsening ratio of the hierarchy. */

@@ -44,6 +44,7 @@
     "\t-r, --rhs <FILE_NAME>                       Read the rhs vector from file <FILE_NAME>.\n"                                        \
     "\t-M, --detailed-metrics <FILE_NAME>          Write process-specific detailed profile log to <FILE_NAME><PROC_ID>.\n"              \
     "\t-o, --out <FILE_NAME>                       Write solution to <FILE_NAME>.\n"                                                    \
+    "\t-R, --out-rhs <FILE_NAME>                   Write rhs vector to <FILE_NAME>.\n"                                                  \
     "\t-O, --out-dir <DIR>                         Write additional files to <DIR>.\n"                                                  \
     "\t-p, --summary-prof <FILE_NAME>              Write process-specific summary profile log to <FILE_NAME><PROC_ID>.\n"               \
     "\t-P, --detailed-prof <FILE_NAME>             Write process-specific detailed profile log to <FILE_NAME><PROC_ID>.\n"              \
@@ -84,6 +85,7 @@ int main(int argc, char** argv)
     itype n = 0;
     std::string settings_file;
     char* output_file_name = NULL;
+    char* rhs_output_file_name = NULL;
     char* info_file_name = NULL;
     char* log_file_name = NULL;
 
@@ -110,6 +112,7 @@ int main(int argc, char** argv)
         { "rhs", required_argument, NULL, 'r' },
         { "detailed-metrics", required_argument, NULL, 'M' },
         { "out", required_argument, NULL, 'o' },
+        { "out-rhs", required_argument, NULL, 'R' },
         { "out-dir", required_argument, NULL, 'O' },
         { "summary-prof", required_argument, NULL, 'p' },
         { "detailed-prof", required_argument, NULL, 'P' },
@@ -120,7 +123,7 @@ int main(int argc, char** argv)
         { "extended-prof", no_argument, NULL, 'x' },
     };
 
-    while ((ch = getopt_long(argc, argv, "a:B:d:e:f:g:hi:l:m:r:M:o:O:p:P:s:S:twx", long_options, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "a:B:d:e:f:g:hi:l:m:r:M:o:O:p:P:R:s:S:twx", long_options, NULL)) != -1) {
         switch (ch) {
         case 'a':
             n = atoi(optarg);
@@ -161,6 +164,9 @@ int main(int argc, char** argv)
             break;
         case 'o':
             output_file_name = strdup(optarg);
+            break;
+        case 'R':
+            rhs_output_file_name = strdup(optarg);
             break;
         case 'O':
             output_dir = optarg;
@@ -220,8 +226,8 @@ int main(int argc, char** argv)
     // Initialize MPI
     // -------------------------------------------------------------------------
 
-    //create_pid_file(myid);
     if (wait) {
+        create_pid_file(myid);
         sleep(60); // Pausa 1 minuto
     }
 
@@ -229,12 +235,19 @@ int main(int argc, char** argv)
     // Load configuration
     // -------------------------------------------------------------------------
 
-    InputParameters ip = ends_with(settings_file, ".properties")
-        ? Params::initFromPropertiesFile(settings_file.c_str())
-        : Params::initFromFile(settings_file.c_str());
+    // InputParameters ip = ends_with(settings_file, ".properties")
+    //     ? Params::initFromPropertiesFile(settings_file.c_str())
+    //     : Params::initFromFile(settings_file.c_str());
+
+    InputParameters ip = Params::initFromPropertiesFile(settings_file.c_str());
     if (ip.error != 0) {
         return -1;
     }
+
+    // -------------------------------------------------------------------------
+    // Rhs. Fem returns that too.
+    // -------------------------------------------------------------------------
+    vector<vtype>* rhs = NULL;
 
     // -------------------------------------------------------------------------
     // Read/Generate input matrix
@@ -248,7 +261,7 @@ int main(int argc, char** argv)
     } else if (opt == LAP) {
         Alocal = generate_lap_local_matrix(n);
     } else if (opt == FEM) {
-        Alocal = generate_fem_local_matrix(input_file, NULL);
+        Alocal = generate_fem_local_matrix(input_file, &rhs);
     }
 
     if (!dump_matrix_prefix.empty()) {
@@ -288,10 +301,53 @@ int main(int argc, char** argv)
     // Initialize solution
     // -------------------------------------------------------------------------
 
-    vector<vtype>* rhs = rhs_file
-        ? Vector::load<vtype>(rhs_file, true)
-        : Vector::init<vtype>(Alocal->n, true, true);
+    if (!rhs) {
+        if (rhs_file) {
+            vector<vtype>* rhs_full = Vector::load<vtype>(rhs_file, false);
+            rhs = Vector::init<vtype>(Alocal->n, true, false);
+            memcpy(rhs->val, rhs_full->val + Alocal->row_shift, Alocal->n * sizeof(vtype));
+            Vector::free(rhs_full);
+            vector<vtype>* rhs_d = Vector::copyToDevice(rhs);
+            Vector::free(rhs);
+            rhs = rhs_d;
+        } else {
+            rhs = Vector::init<vtype>(Alocal->n, true, true);
+            #if 0
+            unsigned long long seed = 1234ULL;
+            Vector::fillWithRandomValues(rhs, 0., 1., seed);
+            #else
+            Vector::fillWithValue(rhs, 1.);
+            #endif
+        }
+    }
     vector<vtype>* x0 = Vector::init<vtype>(Alocal->n, true, true);
+
+    // -------------------------------------------------------------------------
+    // Dump rhs
+    // -------------------------------------------------------------------------
+
+    if (rhs_output_file_name) {
+        if (full_n <= MAX_AGGREGATED_SOLUTION_SIZE) {
+            if (ISMASTER) {
+                printf("Dumping rhs\n");
+            }
+            vector<vtype>* collectedRhs = aggregate_vector_all(rhs, full_n);
+            if (ISMASTER) {
+                FILE* rhs_output_file = fopen(rhs_output_file_name, "w");
+                if (rhs_output_file == NULL) {
+                    printf("Error opening %s for writing\n", rhs_output_file_name);
+                } else {
+                    Vector::print(collectedRhs, -1, rhs_output_file);
+                    fclose(rhs_output_file);
+                }
+            }
+            Vector::free(collectedRhs);
+        } else {
+            if (ISMASTER) {
+                printf("WARNING: rhs cannot be aggregated when size > %ld\n", MAX_AGGREGATED_SOLUTION_SIZE);
+            }
+        }
+    }
 
     // -------------------------------------------------------------------------
     // If LSGS with Chebyshev compute A max eigval

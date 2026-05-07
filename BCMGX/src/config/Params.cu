@@ -230,43 +230,6 @@ std::string preconditioner_type_to_string(const PreconditionerType& val)
 
 // =============================================================================
 
-int get_int_param(FILE* fp, const char* param)
-{
-    int temp;
-    char* token;
-    void* out = fgets(linebuffer, BUFSIZE, fp);
-    if (out == NULL) {
-        DIE("ERROR: reading param %s from conf file\n", param);
-    }
-    token = strtok(linebuffer, DELIM);
-    sscanf(token, "%d", &temp);
-    return (temp);
-}
-
-double get_double_param(FILE* fp, const char* param)
-{
-    double temp;
-    char* token;
-    void* out = fgets(linebuffer, BUFSIZE, fp);
-    if (out == NULL) {
-        DIE("ERROR: reading param %s from conf file\n", param);
-    }
-    token = strtok(linebuffer, DELIM);
-    sscanf(token, "%lf", &temp);
-    return (temp);
-}
-
-std::string get_string_param(FILE* fp, const char* param)
-{
-    void* out = fgets(linebuffer, BUFSIZE, fp);
-    if (out == NULL) {
-        DIE("ERROR: reading param %s from conf file\n", param);
-    }
-    std::string token = strtok(linebuffer, DELIM);
-    trim(token);
-    return token;
-}
-
 void parse_properties_file(const char* path, const std::function<void(const std::string&, const std::string&)>& handler)
 {
     FILE* fp = fopen(path, "r");
@@ -418,75 +381,6 @@ InputParameters initFromPropertiesFile(const char* path)
         inparms.ssteps.push_back(1);
     }
 
-    return inparms;
-}
-
-InputParameters initFromFile(const char* path)
-{
-    _MPI_ENV;
-
-    InputParameters inparms;
-
-    FILE* fp = fopen(path, "r");
-
-    if (ISMASTER) {
-        std::cout << "Reading setting file " << path << "\n";
-    }
-    if (fp == NULL) {
-        DIE("Error opening setting file %s, errno = %d: %s\n", path, errno, strerror(errno));
-    } else {
-        if (ISMASTER) {
-            std::cout << "Setting file found!"
-                      << "\n";
-        }
-    }
-
-    inparms.rhsfile = get_string_param(fp, "rhsfile");
-    if (inparms.rhsfile == "NONE") {
-        inparms.rhsfile = "";
-    }
-    inparms.solfile = get_string_param(fp, "solfile");
-    if (inparms.solfile == "NONE") {
-        inparms.solfile = "";
-    }
-    inparms.solver_types.push_back(string_to_solver_type(get_string_param(fp, "solver_type")));
-    inparms.bootstrap_composition_type = string_to_bootstrap_composition_type(get_string_param(fp, "bootstrap_composition_type"));
-    inparms.max_hrc = get_int_param(fp, "max_hrc");
-    inparms.conv_ratio = get_double_param(fp, "conv_ratio");
-    inparms.matchtype = string_to_match_type(get_string_param(fp, "matchtype"));
-    inparms.aggrsweeps = get_int_param(fp, "aggrsweeps"); // + 1;
-    inparms.aggrtype = get_int_param(fp, "aggrtype");
-    inparms.max_levels = get_int_param(fp, "max_levels");
-    inparms.cycle_type = string_to_cycle_type(get_string_param(fp, "cycle_type"));
-    inparms.coarse_solver = string_to_coarse_solver_type(get_string_param(fp, "coarse_solver"));
-    inparms.relax_type = string_to_relax_type(get_string_param(fp, "relax_type"));
-    inparms.relaxnumber_coarse = get_int_param(fp, "inparms");
-    /*inparms.coarsesolver_type =*/get_int_param(fp, "coarsesolver_type");
-    inparms.prerelax_sweeps = get_int_param(fp, "prerelax_sweeps");
-    inparms.postrelax_sweeps = get_int_param(fp, "postrelax_sweeps");
-    inparms.itnlim = get_int_param(fp, "itnlim");
-    inparms.rtol = get_double_param(fp, "rtol");
-    inparms.mem_alloc_size = GLOB_MEM_ALLOC_SIZE;
-    inparms.error = 0;
-
-    inparms.ssteps.push_back(get_int_param(fp, "sstep"));
-    inparms.stop_criterion = get_int_param(fp, "stop_criterion");
-    inparms.ru_res = get_int_param(fp, "ru_res");
-    inparms.sprec = string_to_preconditioner_type(get_string_param(fp, "sprec"));
-    inparms.l1jacsweeps = get_int_param(fp, "l1jacsweeps");
-    inparms.rec_res_int = get_int_param(fp, "rec_res_int");
-    inparms.dispnorm = get_int_param(fp, "dispnorm");
-    /*inparms.detailedtiming =*/get_int_param(fp, "detailedtiming");
-    if (inparms.max_hrc != 1) {
-        std::cout << "[ERROR] bootstrap not yet supported\n";
-        inparms.error = 1;
-    }
-    if (inparms.aggrtype != 0) {
-        std::cout << "[ERROR] aggr_type value not supported\n";
-        inparms.error = 1;
-    }
-
-    fclose(fp);
     return inparms;
 }
 

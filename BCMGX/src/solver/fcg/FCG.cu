@@ -169,6 +169,7 @@ int flexibileConjugateGradients_v3(CSR* A, handles* h, vector<vtype>* x, vector<
 
     out->niter = iter + 1;
     out->exitRes = l2_norm;
+    out->del0 = delta0;
 
     Vector::free(alpha_beta_gamma);
     Vector::free(w);

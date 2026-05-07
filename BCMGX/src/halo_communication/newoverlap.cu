@@ -178,10 +178,9 @@ void setupOverlapped(CSR* A)
     // ===============================================================
     stype nr_of_cols = A->n;
     if (A->full_n != A->m) {
-        nr_of_cols = A->m / nprocs;
-        if (myid == nprocs - 1) {
-            nr_of_cols += A->m % nprocs;
-        }
+        // For rectangular matrices (P, R), use actual local column count from halo structure.
+        // The uniform estimate A->m/nprocs is wrong for non-uniform SUITOR distributions.
+        nr_of_cols = A->shrinked_m - A->halo.to_receive_n;
     }
     // ===============================================================
 

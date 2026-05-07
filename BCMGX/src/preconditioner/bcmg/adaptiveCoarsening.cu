@@ -309,7 +309,7 @@ hierarchy* adaptiveCoarsening(handles* h, buildData* amg_data, const InputParame
     }
     #endif
 
-    #if 1
+    #if 0
     CHECK_MPI(MPI_Barrier(MPI_COMM_WORLD));
     if (ISMASTER) {
         fprintf(stderr, "Base hierarchy\n");
@@ -330,7 +330,7 @@ hierarchy* adaptiveCoarsening(handles* h, buildData* amg_data, const InputParame
 
             CSR* SA = getSmoother(hrrch->A_array[j], hrrch->D_array[j]);
             sprintf(SA->name, "SA[%d]", j);
-            #if 1
+            #if 0
             {
                 char fname[256] = {0};
                 snprintf(fname, 256, "%s/%s%s.mtx", output_dir.c_str(), output_prefix.c_str(), SA->name);
@@ -352,7 +352,7 @@ hierarchy* adaptiveCoarsening(handles* h, buildData* amg_data, const InputParame
             ASSERT(CSRm::checkUniqueIndeces(newP));
             #endif
             sprintf(newP->name, "newP[%d]", j);
-            #if 1
+            #if 0
             {
                 char fname[256] = {0};
                 snprintf(fname, 256, "%s/%s%s.mtx", output_dir.c_str(), output_prefix.c_str(), newP->name);
@@ -362,7 +362,7 @@ hierarchy* adaptiveCoarsening(handles* h, buildData* amg_data, const InputParame
 
             ASSERT(newP->full_n > newP->m);
             // fprintf(stderr, "myid = %d, %s = n=%d, full_n=%d, m=%d, row_shift=%d, col_shifted=%d\n",  myid, newP->name, newP->n,  newP->full_n,  newP->m,  newP->row_shift,  newP->col_shifted);
-            CSRm::printUniqueColumns(newP, newP->name, stderr);
+            // CSRm::printUniqueColumns(newP, newP->name, stderr);
             // ASSERT(CSRm::checkProduct(h, SA, hrrch->P_array[j], newP));
             // if (ISMASTER) {
             //     CSR *Aj = hrrch->A_array[j];
@@ -375,7 +375,15 @@ hierarchy* adaptiveCoarsening(handles* h, buildData* amg_data, const InputParame
             if (ISMASTER) {
                 printf("Computing newR = newP^T\n");
             }
-            CSR* newR = CSRm::transpose(newP, log_file);
+            // Fix Giacomo 2026-04-15: pass coarseA to CSRm::transpose so it uses the actual
+            // SUITOR-based coarse row distribution (row_shift and n from coarseA, plus the
+            // per-process row counts gathered via MPI_Allgather by ProcessSelector) instead
+            // of the uniform estimate full_n/nprocs * myid. The uniform estimate can be
+            // off-by-one when SUITOR produces an uneven distribution (e.g. 198+197 vs 197+198),
+            // causing matrix items to be routed to the wrong process and leading to OOB accesses
+            // or silent index corruption that makes the solver diverge.
+            CSR* coarseA = hrrch->A_array[j+1];
+            CSR* newR = CSRm::transpose(newP, log_file, coarseA);
             #if CHECK_INDECES
             ASSERT(CSRm::checkUniqueIndeces(newR));
             #endif
@@ -385,6 +393,27 @@ hierarchy* adaptiveCoarsening(handles* h, buildData* amg_data, const InputParame
 
             if (ISMASTER) {
                 printf("Computing newAP = oldA * newP\n");
+            }
+            // Fix Giacomo 2026-04-15: reset shrinked_col and bitcol cache for A_array[j]
+            // before computing A * newP. The cached shrinked_col was built in a P=NULL
+            // context (column range [0, A->n-1]) during the original hierarchy setup.
+            // For A * newP the relevant column range is [0, newP->n-1], which is different
+            // when the smoother changes the number of active columns. Reusing the stale
+            // cache causes out-of-bounds accesses in NSP SpGEMM (shrinked_col values
+            // exceed completedP->n). The fix is inert when CUSPARSE is used for SpGEMM.
+            {
+                CSR* Aj = hrrch->A_array[j];
+                if (Aj->shrinked_col) {
+                    CUDA_FREE(Aj->shrinked_col);
+                    Aj->shrinked_col = NULL;
+                }
+                Aj->shrinked_flag = false;
+                if (Aj->bitcol) {
+                    CUDA_FREE(Aj->bitcol);
+                    Aj->bitcol = NULL;
+                    Aj->bitcolsize = 0;
+                    Aj->nonuniquesize = 0;
+                }
             }
             CSR* newAP = CSRm::product(h, hrrch->A_array[j], newP);
             #if CHECK_INDECES
@@ -434,14 +463,29 @@ hierarchy* adaptiveCoarsening(handles* h, buildData* amg_data, const InputParame
             }
             #endif
 
-            // Fix (Giacomo 2025-11-11)
-            // auto newR_col_shifted = 0;
+            // Begin Fix (Giacomo 2025-11-11)
+            // After CSRm::transpose above, newR has:
+            //   row_shift  = coarseA->row_shift          (coarse rows owned by this process)
+            //   col_shifted = -coarseA->row_shift        => col8 = global_fine - coarseA->row_shift
+            //
+            // The product (getmct + compute_rows_to_rcv_CPU) that evaluates
+            // newR * newAP requires a different convention for newR's columns:
+            //   col8 = global_fine - newAP->row_shift
+            //     => getmct marks col8 in [0, newAP->n-1] as local (correct fine-level range)
+            //   row_shift = newAP->row_shift
+            //     => compute_rows_to_rcv_CPU: search_index = row_shift + col8 = global_fine
+            //        (used to determine which process owns each fine-level column)
+            //
+            // The fix re-shifts newR's columns and updates row_shift to fine-level values.
+            // After CSRm::product(newR, newAP) => newA, newA->row_shift will equal
+            // newAP->row_shift (fine-level); the block below (Fix 3) corrects it to the
+            // actual SUITOR coarse shift.
             if (newR->col_shifted) {
                 // newR_col_shifted = newR->col_shifted;
-                CSRm::shift_cols(newR, -newR->col_shifted);
-                CSRm::shift_cols(newR, -newAP->row_shift);
+                CSRm::shift_cols(newR, -newR->col_shifted);      // undo coarse shift => global fine cols
+                CSRm::shift_cols(newR, -(long)newAP->row_shift); // apply fine shift => col8 = fine - fine_shift
                 newR->row_shift = newAP->row_shift;
-                newR->col_shifted = -newAP->row_shift;
+                newR->col_shifted = -(long)newAP->row_shift;
             }
             // End Fix (Giacomo 2025-11-11)
 
@@ -475,8 +519,34 @@ hierarchy* adaptiveCoarsening(handles* h, buildData* amg_data, const InputParame
             //     printf("newA = R * AP: n=%d, full_n=%d, m=%d\n", newA->n, newA->full_n, newA->m);
             // }
 
-            adjustShift(newA);
-            adjustShift(newP);
+            // Fix Giacomo 2026-04-15: replace the two adjustShift() calls with an explicit
+            // shift using the actual coarse row_shift from the hierarchy.
+            //
+            // adjustShift() estimates the first coarse global index as:
+            //   shift = (A->m / nprocs) * myid
+            // This is the uniform-distribution estimate and can be off-by-one when SUITOR
+            // produces an uneven coarse distribution (e.g. process 0 aggregates 198 coarse
+            // nodes and process 1 aggregates 197, but uniform gives 197 to both except the
+            // last). The off-by-one shifts col8 by +/-1 for every column in newA and newP,
+            // corrupting the coarse-level correction and causing the solver to diverge.
+            //
+            // hrrch->A_array[j+1]->row_shift is computed by matchingPairAggregation via
+            // MPI_Allgather of the actual local coarse counts, so it is always exact.
+            {
+                gstype S_actual = hrrch->A_array[j+1]->row_shift;
+                // newA: square coarse-level matrix — shift both rows and cols to coarse origin
+                if (newA->row_shift && !newA->col_shifted) {
+                    CSRm::shift_cols(newA, -(long)S_actual);
+                    newA->col_shifted = -(long)S_actual;
+                    newA->row_shift = S_actual;
+                }
+                // newP: rectangular (fine rows, coarse cols) — only col_shifted changes;
+                // row_shift stays at the fine-level value set by CSRm::product.
+                if (newP->row_shift && !newP->col_shifted) {
+                    CSRm::shift_cols(newP, -(long)S_actual);
+                    newP->col_shifted = -(long)S_actual;
+                }
+            }
 
             #if DEBUG
             {
@@ -592,7 +662,12 @@ hierarchy* adaptiveCoarsening(handles* h, buildData* amg_data, const InputParame
                 // fprintf(stderr, "================================================\n");
                 // fflush(stderr);
                 #endif
-                halo_info hi = haloSetup(newP, NULL);
+                // Fix Giacomo 2026-04-15: pass hrrch->A_array[j+1] as the second argument
+                // so that getMissing uses nr_of_cols = R->n and mypfirstrow = R->row_shift
+                // from the actual SUITOR coarse distribution, instead of the uniform estimate
+                // newP->m / nprocs that the R=NULL path would use. This ensures the halo
+                // correctly identifies which coarse columns are remote for each process.
+                halo_info hi = haloSetup(newP, hrrch->A_array[j+1]);
                 newP->halo = hi;
                 #if DEBUG
                 // fprintf(stderr, "================================================\n");
@@ -618,7 +693,19 @@ hierarchy* adaptiveCoarsening(handles* h, buildData* amg_data, const InputParame
                 // fprintf(stderr, "================================================\n");
                 // fflush(stderr);
                 #endif
-                halo_info hi = haloSetup(newR, NULL);
+                // Fix Giacomo 2026-04-15 (revised 2026-04-15): pass hrrch->A_array[j] as the
+                // second argument so that getMissing uses nr_of_cols = R->n (exact local fine
+                // row count) instead of A->m / nprocs (integer-truncated uniform estimate).
+                // When total_fine is not divisible by nprocs the truncated estimate is too small
+                // by 1 for some ranks, causing their last local col8 to escape the filter and be
+                // treated as remote => the lookup maps it back to myid => NULL-deref crash.
+                //
+                // In the active implementation (USE_GET_MISSING_NEW=1), R != NULL still uses
+                // A->col8 (newR->col8) for the filter - NOT R->col8 - so passing A_array[j]
+                // here only fixes the column-count estimate without changing what is filtered.
+                // (The old getMissing in the #else branch did use R->col8, which was the
+                // original concern; that code path is no longer active.)
+                halo_info hi = haloSetup(newR, hrrch->A_array[j]);
                 newR->halo = hi;
                 #if DEBUG
                 // fprintf(stderr, "================================================\n");
@@ -674,9 +761,11 @@ hierarchy* adaptiveCoarsening(handles* h, buildData* amg_data, const InputParame
                 // ASSERT(!newP || !newP->shrinked_flag);
 
                 if (newA) shrink_col(newA, NULL);
-                // if (newP) shrink_col(newP, hrrch->A_array[j + 1]);
-                if (newP) shrink_col(newP, NULL);
-                if (newR) shrink_col(newR, NULL);
+                // Fix Giacomo 2026-04-16: use the correct reference matrix so that
+                // get_shrinked_col uses P->n (exact local count) not Alocal->n (wrong for
+                // rectangular P/R). Mirrors the first-pass pattern at lines 240-242.
+                if (newP) shrink_col(newP, hrrch->A_array[j + 1]);
+                if (newR) shrink_col(newR, hrrch->A_array[j]);
 
                 ASSERT(!newA || newA->shrinked_m <= newA->m);
                 ASSERT(!newP || newP->shrinked_m <= newP->m);
@@ -709,7 +798,7 @@ hierarchy* adaptiveCoarsening(handles* h, buildData* amg_data, const InputParame
             fprintf(stderr, "Smoothing prolungator [DONE 2/2]\n");
         }
 
-        #if 1
+        #if 0
         CHECK_MPI(MPI_Barrier(MPI_COMM_WORLD));
         if (ISMASTER) {
             fprintf(stderr, "Recomputed hierarchy\n");

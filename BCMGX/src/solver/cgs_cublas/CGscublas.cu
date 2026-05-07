@@ -4,6 +4,7 @@
 // Chronopoulos, A., Gear, C., On the Efficient Implementation of Preconditioned s-step Conjugate Gradient Methods on Multiprocessors with Memory Hierarchy,
 // Parallel Computing, Vol. 11, N. 1, 1989, pages 37--53.
 // Here we use cublas for basic operations on small dense matrices.
+
 #include "CGscublas.h"
 
 #include "halo_communication/halo_communication.h"

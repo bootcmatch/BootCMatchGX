@@ -16,6 +16,7 @@
 
 // #include "nsp2.h"
 #include "nsparse.h"
+#include "nsp/nsp.h"
 
 SpSpLib SPSP_LIB = SpSpLib::CUSPARSE;
 
@@ -359,15 +360,14 @@ extern char idstring[];
 CSR* nsparseMGPU(CSR* Alocal, CSR* Pfull, csrlocinfo* Plocal /*, bool used_by_solver*/)
 {
     static int count = 0;
-
-    // ASSERT(CSRm::checkUniqueIndeces(Alocal));
-    // ASSERT(CSRm::checkUniqueIndeces(Pfull));
     
     _MPI_ENV;
 
-    // fprintf(stderr, "myid = %d, count = %d\n", myid, count);
-    // if (count > 21)
+    // fprintf(stderr, "myid = %d, count = %d [BEGIN]\n", myid, count);
+    // if (count == 18)
     // {
+    //     ASSERT(CSRm::checkUniqueIndeces(Alocal));
+    //     ASSERT(CSRm::checkUniqueIndeces(Pfull));
     //     {
     //         char fname[1024] = {0};
     //         snprintf(fname, 1024, "%s/%s%s%d_id%d_nprocs%d.mtx", output_dir.c_str(), output_prefix.c_str(), "Alocal", count, myid, nprocs);
@@ -455,7 +455,6 @@ CSR* nsparseMGPU(CSR* Alocal, CSR* Pfull, csrlocinfo* Plocal /*, bool used_by_so
             break;
         }
         case SpSpLib::NSP: {
-            void nsp_spgemm_kernel_hash(sfCSR *a, sfCSR *b, sfCSR *c);
             nsp_spgemm_kernel_hash(&mat_a, &mat_p, &mat_c);
             break;
         }
@@ -467,6 +466,8 @@ CSR* nsparseMGPU(CSR* Alocal, CSR* Pfull, csrlocinfo* Plocal /*, bool used_by_so
             DIE("Unsupported SpSpLib");
         }
     }
+
+    // fprintf(stderr, "myid = %d, count = %d [END]\n", myid, count);
 
     mat_c.M = mat_a.M;
     mat_c.N = mat_p.N;
@@ -559,6 +560,7 @@ vector<gsstype>* get_missing_col(CSR* Alocal, CSR* Plocal)
     long* ptr = getmct(Alocal->col8, Alocal->nnz, 0, myplastrow, &uvs, &(Alocal->bitcol), &(Alocal->bitcolsize), &(Alocal->nonuniquesize), NUM_THR); // FIX
     if (uvs == 0) {
         vector<gsstype>* _bitcol = Vector::init<long>(1, true, false); // FIX
+        _bitcol->n = 0; // no remote columns: mark empty so compute_rows_to_rcv_CPU skips the loop
         return _bitcol;
     } else {
         vector<gsstype>* _bitcol = Vector::init<long>(uvs, false, false); // FIX
@@ -748,7 +750,7 @@ void compute_rows_to_rcv_CPU(CSR* Alocal, CSR* Plocal, vector<long>* _bitcol)
     }
     itype countall = 0;
 
-    itype* aofwhichproc = MALLOC(itype, _bitcol->n);
+    itype* aofwhichproc = _bitcol->n > 0 ? MALLOC(itype, _bitcol->n) : NULL;
     for (int j = 0; j < _bitcol->n; j++) {
         long search_index = Alocal->row_shift + _bitcol->val[j];
 

@@ -113,7 +113,13 @@ void getMissing(CSR* A, vector<itype>** missing, CSR* R, gstype* row_shift)
     int uvs;
     long* ptr;
     if (R != NULL) {
-        ptr = getmct(R->col8, R->nnz, 0, R->n - 1, &uvs, &(R->bitcol), &(R->bitcolsize), &(R->nonuniquesize), NUM_THR);
+        // Fix Giacomo 2026-04-15: use A->col8 / A->nnz (the matrix whose halo we are
+        // setting up, e.g. newP) instead of R->col8 / R->nnz (the coarse matrix passed
+        // only for its partitioning info: R->n = exact local coarse count, R->row_shift =
+        // exact coarse offset). Using R->col8 scanned the wrong column array and could
+        // map a column back to taskmap[J] == myid, causing a NULL dereference on
+        // missing[myid]->val (SIGSEGV at address 0x8) on non-master processes.
+        ptr = getmct(A->col8, A->nnz, 0, R->n - 1, &uvs, &(A->bitcol), &(A->bitcolsize), &(A->nonuniquesize), NUM_THR);
     } else {
         #if DEBUG
         if (log_file) {

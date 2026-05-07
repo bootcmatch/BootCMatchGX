@@ -19,14 +19,14 @@
  * @brief Enum class to represent the available solvers.
  */
 enum class SolverType {
-    CGHS, /** Classic Conjugate Gradient */
-    FCG, /** Flexible Conjugate Gradient */
-    CGS, /** Conjugate Gradient s-step by Chronopoulos and Gear */
-    PIPELINED_CGS, /** Pipeline version Conjugate Gradient s-step */
-    CGS_CUBLAS, /** Conjugate Gradient s-step using cuBLAS */
-    LSGS, /** Lanczos version of CG s-step with Gauss-Seidel */
-    CGSN, /** CG s-step with Chebyshev basis and Gauss-Seidel Gram solve */
-    INVALID /** Represents an invalid solver type */
+    CGHS, /**< Conjugate Gradient with Hybrid Solver */
+    FCG, /**< Flexible Conjugate Gradient */
+    CGS, /**< Conjugate Gradient s-step by Chronopoulos and Gear */
+    PIPELINED_CGS, /**< Pipeline version Conjugate Gradient s-step */
+    CGS_CUBLAS, /**< Conjugate Gradient s-step using cuBLAS */
+    LSGS, /**< Lanczos version of CG s-step with Gauss-Seidel */
+    CGSN, /**< CG s-step with Chebyshev basis and Gauss-Seidel Gram solve (Naumov) */
+    INVALID /**< Represents an invalid solver type */
 };
 
 /**
@@ -324,17 +324,6 @@ namespace Params {
  * @return An InputParameters object initialized with values from the file.
  */
 InputParameters initFromPropertiesFile(const char* path);
-
-/**
- * @brief Reads parameters from a deprecated file format.
- *
- * This function is deprecated. Use `initFromPropertiesFile` instead.
- *
- * @deprecated
- * @param path Path to the deprecated configuration file.
- * @return An InputParameters object initialized with values from the file.
- */
-InputParameters initFromFile(const char* path);
 
 /**
  * @brief Dumps the current parameters to an output stream.

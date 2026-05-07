@@ -206,9 +206,15 @@ __global__ void _make_w(stype nnz, vtype* val, vtype min)
     if (i >= nnz) {
         return;
     }
+
     vtype scratch = fabs(val[i]);
-    // val[i] = log(scratch ? scratch : SUITOR_EPS / (0.999 * (min)));
-    val[i] = log((scratch ? scratch : SUITOR_EPS) / (0.999 * min)); // GIACOMO 2026-04-13
+
+    // PASQUA 2026-04-21
+    if (min > DBL_EPSILON) {
+        val[i]=log(scratch / (0.999 * min));
+    } else {
+        val[i]=DBL_MAX;
+    }
 }
 
 CSR* toMaximumProductMatrix(CSR* AH)

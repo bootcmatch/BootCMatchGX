@@ -72,6 +72,11 @@ void dump(const char* filename, const InputParameters& ip, const CurrentParamete
         logf(fp, "l1-jacobi sweeps                             : %d\n", ip.l1jacsweeps);
         break;
     }
+    case PreconditionerType::BCMG: {
+        logf(fp, "aggr sweeps                                  : %d\n", ip.aggrsweeps);
+        logf(fp, "smoothed prolungator                         : %d\n", ip.smoothed_prolungator);
+        break;
+    }
     }
 
     // ---------------------------------------------------------------------

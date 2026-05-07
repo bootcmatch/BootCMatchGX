@@ -1,3 +1,4 @@
+#pragma once
 #include <cusparse_v2.h>
 //#include "prec_setup/spmspmMGPU/csrseg.h"
 #include "datastruct/csrlocinfo.h"

@@ -1,0 +1,149 @@
+#pragma once
+
+#include <cuda_runtime.h>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+// ---------------------------------------------------------------------------
+// Error helpers
+// ---------------------------------------------------------------------------
+
+#define ERROR_INFO __FILE__, __LINE__
+
+class linsol_error : public std::exception {
+public:
+    linsol_error() {}
+    linsol_error(const char* file, int line, const char* msg = "") {}
+    linsol_error(const char* msg) {}
+};
+
+// ---------------------------------------------------------------------------
+// VEC_GPU<T>
+// ---------------------------------------------------------------------------
+
+template<typename T>
+class VEC_GPU {
+    T*     ptr_ = nullptr;
+    size_t sz_  = 0;
+public:
+    VEC_GPU() = default;
+    ~VEC_GPU() { if (ptr_) cudaFree(ptr_); }
+
+    // non-copyable
+    VEC_GPU(const VEC_GPU&) = delete;
+    VEC_GPU& operator=(const VEC_GPU&) = delete;
+
+    void resize(size_t n) {
+        if (n == sz_) return;
+        if (ptr_) { cudaFree(ptr_); ptr_ = NULL; sz_ = 0; }
+        if (n == 0) return;
+        cudaError_t e = cudaMalloc((void**)&ptr_, n * sizeof(T));
+        if (e != cudaSuccess) throw linsol_error(ERROR_INFO, "cudaMalloc failed");
+        sz_ = n;
+    }
+
+    void assign(size_t n, T val) {
+        resize(n);
+        cudaError_t e = cudaMemset(ptr_, 0, n * sizeof(T));
+        if (e != cudaSuccess) throw linsol_error(ERROR_INFO, "cudaMemset failed");
+        (void)val;  // only val==0 is used; correct by our calling convention
+    }
+
+    T*     data()  const { return ptr_; }
+    size_t size()  const { return sz_;  }
+};
+
+// ---------------------------------------------------------------------------
+// VEC_CPU<T> — host vector thin wrapper
+// ---------------------------------------------------------------------------
+
+template<typename T>
+class VEC_CPU {
+    std::vector<T> v_;
+public:
+    void resize(size_t n) {
+        try { v_.resize(n); }
+        catch (...) { throw linsol_error(ERROR_INFO, "std::vector::resize failed"); }
+    }
+    T*     data()  { return v_.data(); }
+    size_t size()  const { return v_.size(); }
+    T& operator[](size_t i) { return v_[i]; }
+    const T& operator[](size_t i) const { return v_[i]; }
+};
+
+// ---------------------------------------------------------------------------
+// ChronosDevice — GPU property accessor (singleton-style global)
+// ---------------------------------------------------------------------------
+
+class ChronosDeviceType {
+    cudaDeviceProp prop_;
+    int  dev_   = -1;   // device for which prop_ was last queried
+    void init() {
+        int dev = 0;
+        cudaError_t e = cudaGetDevice(&dev);
+        if (e != cudaSuccess) throw linsol_error(ERROR_INFO, "cudaGetDevice failed");
+        if (dev == dev_) return;  // re-init whenever the active device changes
+        e = cudaGetDeviceProperties(&prop_, dev);
+        if (e != cudaSuccess) throw linsol_error(ERROR_INFO, "cudaGetDeviceProperties failed");
+        dev_ = dev;
+    }
+public:
+    long int get_sharedMemPerMultiprocessor()  { init(); return (long int)prop_.sharedMemPerMultiprocessor; }
+    long int get_sharedMemPerBlock()           { init(); return (long int)prop_.sharedMemPerBlock; }
+    int      get_warpSize()                    { init(); return prop_.warpSize; }
+    int      get_maxBlocksPerMultiProcessor()  { init(); return prop_.maxBlocksPerMultiProcessor; }
+    int      get_maxThreadsPerMultiProcessor() { init(); return prop_.maxThreadsPerMultiProcessor; }
+    int      get_regsPerBlock()                { init(); return prop_.regsPerBlock; }
+    int      get_maxThreadsPerBlock() {
+        init();
+        return prop_.maxThreadsPerBlock;
+        // return min(512, (int)prop_.maxThreadsPerBlock);
+    }
+};
+
+inline ChronosDeviceType ChronosDevice;
+
+// ---------------------------------------------------------------------------
+// Constants expected by nsp-new kernels
+// ---------------------------------------------------------------------------
+
+#ifndef BIN_NUM
+#define BIN_NUM 11
+#endif
+
+#ifndef MAX_SH_DENSE
+#define MAX_SH_DENSE 5120
+#endif
+
+#ifndef MIN_DENSITY
+#define MIN_DENSITY 10.
+#endif
+
+#ifndef MIN_DENSITY_chunk
+#define MIN_DENSITY_chunk 30.
+#endif
+
+#ifndef HASH_FAC_SYMB
+#define HASH_FAC_SYMB 2
+#endif
+
+#ifndef HASH_FAC_COMP
+#define HASH_FAC_COMP 2
+#endif
+
+#ifndef BLKSIZE_MxM
+#define BLKSIZE_MxM 1024
+#endif
+
+#define LaunchCudaKernel(...) \
+    do { \
+        __VA_ARGS__; \
+        cudaError_t _nsp_launch_err = cudaGetLastError(); \
+        if (_nsp_launch_err != cudaSuccess) \
+            throw linsol_error(ERROR_INFO, cudaGetErrorString(_nsp_launch_err)); \
+    } while(0)
+
+// Read a value from global memory via the read-only cache (__ldg).
+template<typename T>
+__device__ __forceinline__ T load_glob(const T *ptr) { return __ldg(ptr); }

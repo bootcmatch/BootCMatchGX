@@ -21,15 +21,14 @@ namespace Hierarchy {
         H->A_array = NULL;
         H->P_array = NULL;
         H->R_array = NULL;
-        // H->R_local_array = NULL;
-        // H->P_local_array = NULL;
+        H->global_nnz_array = NULL;
 
         if (allocate_mem) {
             H->A_array = MALLOC(CSR*, num_levels, true);
             H->P_array = MALLOC(CSR*, num_levels - 1, true);
             H->R_array = MALLOC(CSR*, num_levels - 1, true);
-            // H->R_local_array = MALLOC(CSR*, num_levels - 1, true);
-            // H->P_local_array = MALLOC(CSR*, num_levels - 1, true);
+            H->global_nnz_array = MALLOC(long, num_levels, true);
+            
             H->D_array = MALLOC(vector<vtype>*, num_levels, true);
             H->M_array = MALLOC(vector<vtype>*, num_levels, true);
 
@@ -37,8 +36,6 @@ namespace Hierarchy {
                 H->D_array[i] = NULL;
                 if (i != H->num_levels - 1) {
                     H->R_array[i] = NULL;
-                    // H->R_local_array[i] = NULL;
-                    // H->P_local_array[i] = NULL;
                 }
                 H->M_array[i] = NULL;
             }
@@ -70,12 +67,6 @@ namespace Hierarchy {
                     if (H->R_array[i] != NULL) {
                         CSRm::free(H->R_array[i]);
                     }
-                    // if (H->R_local_array[i] != NULL) {
-                    //     CSRm::free(H->R_local_array[i]);
-                    // }
-                    // if (H->P_local_array[i] != NULL) {
-                    //     CSRm::free(H->P_local_array[i]);
-                    // }
                 }
             }
 
@@ -83,10 +74,12 @@ namespace Hierarchy {
             FREE(H->D_array);
             FREE(H->M_array);
             FREE(H->P_array);
+            FREE(H->global_nnz_array);
             H->A_array = NULL;
             H->D_array = NULL;
             H->M_array = NULL;
             H->P_array = NULL;
+            H->global_nnz_array = NULL;
 
             FREE(H);
         }
@@ -111,17 +104,14 @@ namespace Hierarchy {
             return;
         }
 
+        H->global_nnz_array = (long*)realloc(H->global_nnz_array, levels_used * sizeof(long));
+        CHECK_HOST(H->global_nnz_array);
+
         H->P_array = (CSR**)realloc(H->P_array, (levels_used - 1) * sizeof(CSR*));
         CHECK_HOST(H->P_array);
 
         H->R_array = (CSR**)realloc(H->R_array, (levels_used - 1) * sizeof(CSR*));
         CHECK_HOST(H->R_array);
-
-        // H->R_local_array = (CSR**)realloc(H->R_local_array, (levels_used - 1) * sizeof(CSR*));
-        // CHECK_HOST(H->R_local_array);
-
-        // H->P_local_array = (CSR**)realloc(H->P_local_array, (levels_used - 1) * sizeof(CSR*));
-        // CHECK_HOST(H->P_local_array);
     }
 
     long getNNZglobal(CSR* A)
@@ -146,9 +136,10 @@ namespace Hierarchy {
         vtype cmplxfinal = 0;
 
         for (int i = 0; i < h->num_levels; i++) {
-            cmplxfinal += getNNZglobal(h->A_array[i]);
+            h->global_nnz_array[i] = getNNZglobal(h->A_array[i]);
+            cmplxfinal += h->global_nnz_array[i];
         }
-        cmplxfinal /= getNNZglobal(h->A_array[0]);
+        cmplxfinal /= h->global_nnz_array[0];
         h->op_cmplx = cmplxfinal;
         return cmplxfinal;
     }
@@ -157,9 +148,9 @@ namespace Hierarchy {
     {
         vtype wcmplxfinal = 0;
         for (int i = 0; i < h->num_levels; i++) {
-            wcmplxfinal += pow(2, i) * getNNZglobal(h->A_array[i]);
+            wcmplxfinal += pow(2, i) * h->global_nnz_array[i];
         }
-        wcmplxfinal /= getNNZglobal(h->A_array[0]);
+        wcmplxfinal /= h->global_nnz_array[0];
         h->op_wcmplx = wcmplxfinal;
         return wcmplxfinal;
     }
@@ -169,10 +160,11 @@ namespace Hierarchy {
         logf(fp, "Number of levels                             : %d\n", h->num_levels);
         for (int i = 0; i < h->num_levels; i++) {
             CSR* Ai = h->A_array[i];
-            float avg_nnz = (float)Ai->nnz / (float)Ai->n;
+            long gnnz = h->global_nnz_array[i];
+            float avg_nnz = (float)gnnz / (float)Ai->full_n;
 
-            logf(fp, "A%-44d: n: %ld nnz: %d avg_nnz: %f\n",
-                i, Ai->full_n, Ai->nnz, avg_nnz);
+            logf(fp, "A%-44d: n: %ld nnz: %ld avg_nnz: %f\n",
+                i, (long)Ai->full_n, gnnz, avg_nnz);
         }
         logf(fp, "Current cmplx for V-cycle                    : %lf\n", h->op_cmplx);
         logf(fp, "Current cmplx for W-cycle                    : %lf\n", h->op_wcmplx);

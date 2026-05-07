@@ -2,10 +2,12 @@ backup.sh
 BCMGX/bin
 BCMGX/lib
 BCMGX/data
+BCMGX/doxygen
 BCMGX/obj
-BCMGX/out
+BCMGX/out*
 BCMGX/testout
 BCMGX/malloc.list
+BCMGX/MPI_*.pid
 BCMGX/src/test/data/cmp/lap3d_7p_50x50x50_*
 BCMGX/src/test/data/cmp/lap3d_7p_100x100x100_*
 BCMGX/src/test/data/cmp/lap3d_27p_50x50x50_*
@@ -14,6 +16,8 @@ BCMGX/src/test/data/mtx/lap3d_7p_10x10x10_*
 BCMGX/src/test/data/mtx/lap3d_7p_50x50x50_*
 BCMGX/src/test/data/mtx/lap3d_27p_10x10x10_*
 BCMGX/src/test/data/mtx/lap3d_27p_50x50x50_*
+EXTERNAL/nsp-main/bin
+EXTERNAL/nsp-main/obj
 doxygen
 matlab/input/lap3d_*
 matlab/output/*

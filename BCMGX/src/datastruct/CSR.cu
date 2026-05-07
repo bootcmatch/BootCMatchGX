@@ -2014,9 +2014,9 @@ matrixItem_t* CSRm::collectMatrixItems_nogpu(CSR* dlA, FILE* debug, bool useColS
  CSR* CSRm::transpose(CSR* dlA, FILE* f, CSR* out_distr)
  {
      assert(dlA->on_the_device);
- 
+
      _MPI_ENV;
- 
+
      // Compute transposed matrix properties
      // ---------------------------------------------------------------------------
      gstype full_n = dlA->m;
@@ -2916,7 +2916,7 @@ void CSRm::fillWithValues(CSR* A, std::initializer_list<vtype> list)
             col = 0;
         }
     }
-
+    
     if (!A->nnz) {
         A->nnz = nnz;
     } else {
