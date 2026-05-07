@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
-#include <nsparse.h>
+// #include <nsparse.h>
 #include <unistd.h>
 
 #define DEFAULTSCALENNZMISS 64
@@ -22,8 +22,8 @@ std::string output_dir = "./";
 std::string output_prefix = "";
 std::string output_suffix = "";
 
-void release_bin(sfBIN bin);
-extern sfBIN global_bin;
+// void release_bin(sfBIN bin);
+// extern sfBIN global_bin;
 
 extern double CUSPARSE_CHUNK_FRACTION;
 
@@ -150,9 +150,9 @@ void shutdown()
     FREE(itaskmap);
 
     CUDA_FREE(xvalstat);
-    if (global_bin.stream) {
-        release_bin(global_bin);
-    }
+    // if (global_bin.stream) {
+    //     release_bin(global_bin);
+    // }
 
     MPI_Finalize();
 }

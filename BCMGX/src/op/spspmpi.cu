@@ -15,7 +15,7 @@
 #define BITXBYTE 8
 
 // #include "nsp2.h"
-#include "nsparse.h"
+// #include "nsparse.h"
 #include "nsp/nsp.h"
 
 SpSpLib SPSP_LIB = SpSpLib::CUSPARSE;
@@ -42,8 +42,8 @@ SpSpLib string_to_spsplib(const std::string& str)
 {
     if (str == "CUSPARSE") {
         return SpSpLib::CUSPARSE;
-    } else if (str == "NSPARSE") {
-        return SpSpLib::NSPARSE;
+    // } else if (str == "NSPARSE") {
+    //     return SpSpLib::NSPARSE;
     } else if (str == "NSP") {
         return SpSpLib::NSP;
     // } else if (str == "NSP2") {
@@ -58,8 +58,8 @@ std::string spsplib_to_string(const SpSpLib& val)
     switch (val) {
     case SpSpLib::CUSPARSE:
         return "CUSPARSE";
-    case SpSpLib::NSPARSE:
-        return "NSPARSE";
+    // case SpSpLib::NSPARSE:
+    //     return "NSPARSE";
     case SpSpLib::NSP:
         return "NSP";
     // case SpSpLib::NSP2:
@@ -450,10 +450,10 @@ CSR* nsparseMGPU(CSR* Alocal, CSR* Pfull, csrlocinfo* Plocal /*, bool used_by_so
 
             break;
         }
-        case SpSpLib::NSPARSE: {
-            spgemm_csrseg_kernel_hash(&mat_a, &mat_p, &mat_c, Plocal, true /* used_by_solver */);
-            break;
-        }
+        // case SpSpLib::NSPARSE: {
+        //     spgemm_csrseg_kernel_hash(&mat_a, &mat_p, &mat_c, Plocal, true /* used_by_solver */);
+        //     break;
+        // }
         case SpSpLib::NSP: {
             nsp_spgemm_kernel_hash(&mat_a, &mat_p, &mat_c);
             break;

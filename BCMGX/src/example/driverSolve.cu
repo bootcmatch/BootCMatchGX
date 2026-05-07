@@ -20,7 +20,7 @@
 
 #include <getopt.h>
 #include <mpi.h>
-#include <nsparse.h>
+// #include <nsparse.h>
 #include <regex>
 #include <stdint.h>
 #include <stdio.h>

@@ -12,8 +12,8 @@ ALL_OBJS         := $(C_OBJS) $(CU_OBJS)
 ALL_DEPS         := $(C_DEPS) $(CU_DEPS)
 
 OBJECTS = \
-	$(BUILDDIR)/EXTERNAL/nsparse.o \
-	$(ALL_OBJS)
+	$(ALL_OBJS) \
+	# $(BUILDDIR)/EXTERNAL/nsparse.o
 
 # ==============================================================================
 
@@ -41,10 +41,9 @@ info:
 # EXTERNAL - nsparse
 # ==============================================================================
 
-# $(BUILDDIR)/EXTERNAL/nsparse.o: $(NSPARSE_PATH)/src/kernel/kernel_spgemm_hash_d.cu
-$(BUILDDIR)/EXTERNAL/nsparse.o: $(NSPARSE_PATH)/src/kernel/kernel_spgemm_hash_d_nodeps_v1.cu
-	$(MKDIR) $(@D)
-	$(NVCC) -c -DDOUBLE -o $@ $(DEFINE) $(LIBS) $(INCLUDE) $(NSPARSE_GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
+# $(BUILDDIR)/EXTERNAL/nsparse.o: $(NSPARSE_PATH)/src/kernel/kernel_spgemm_hash_d_nodeps_v1.cu
+# 	$(MKDIR) $(@D)
+# 	$(NVCC) -c -DDOUBLE -o $@ $(DEFINE) $(LIBS) $(INCLUDE) $(NSPARSE_GPU_ARCH) $(NVCC_FLAG) $^ $(NVCC_OPT)
 
 # ==============================================================================
 # EXTERNAL - nsp
@@ -67,4 +66,4 @@ $(C_OBJS): %.o: $$(patsubst $(BUILDDIR)/$$(PERCENT),$(SOURCEDIR)/$$(PERCENT),%.c
 
 $(CU_OBJS): %.o: $$(patsubst $(BUILDDIR)/$$(PERCENT),$(SOURCEDIR)/$$(PERCENT),%.cu)
 	$(MKDIR) $(@D)
-	$(NVCC) -MMD -MP -c -DDOUBLE -o $@ $(DEFINE) $(LIBS) $(INCLUDE) $(NSPARSE_GPU_ARCH) $(NVCC_FLAG) $< $(NVCC_OPT)
+	$(NVCC) -MMD -MP -c -DDOUBLE -o $@ $(DEFINE) $(LIBS) $(INCLUDE) $(GPU_ARCH) $(NVCC_FLAG) $< $(NVCC_OPT)

@@ -13,7 +13,7 @@
 
 enum class SpSpLib {
     CUSPARSE,
-    NSPARSE,
+    // NSPARSE,
     NSP,
     // NSP2,
     INVALID

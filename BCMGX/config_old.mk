@@ -88,6 +88,9 @@ endif
 ifeq ($(shell test -d ../../../../InstalledSW/LAPACK/lapack-master && echo -n yes),yes)
 LAPACK_LIB := ../../../../InstalledSW/LAPACK/lapack-master
 endif
+ifeq ($(shell test -d ../../../../InstalledSW/lapack-master && echo -n yes),yes)
+LAPACK_LIB := ../../../../InstalledSW/lapack-master
+endif
 
 ifeq ($(LAPACK_LIB),)
 $(error Could not find LAPACK_LIB: please edit config.mk)
@@ -123,13 +126,13 @@ NVCC_FLAG = -DOMPI_SKIP_MPICXX $(CPP_STD) --extended-lambda # -Xptxas=-v
 GPU_ARCH = -arch=$(CUDA_GPU_ARCH) -m64
 
 LIBS += -lcuda -lcudart -lcublas -lcusolver -lcurand -L$(MPI_DIR)/lib -lmpi -lnvToolsExt -lnvidia-ml -lcusparse #-lpthread
-INCLUDE = -Isrc -Isrc/nsp -I$(MPI_INCLUDE_DIR) -I$(NSPARSE_PATH)/inc -I$(NSP_PATH) -Iinclude
+INCLUDE = -Isrc -Isrc/nsp -I$(MPI_INCLUDE_DIR) -I$(NSP_PATH) -Iinclude #-I$(NSPARSE_PATH)/inc
 DEFINE = #-DGENERAL_TRANSPOSE #-DDETAILED_TIMING
 
 export LD_LIBRARY_PATH+=$(MPI_DIR)/lib
 
-NSPARSE_PATH = ../EXTERNAL/nsparse-master/cuda-c
-NSPARSE_GPU_ARCH = $(GPU_ARCH)
+# NSPARSE_PATH = ../EXTERNAL/nsparse-master/cuda-c
+# NSPARSE_GPU_ARCH = $(GPU_ARCH)
 
 NSP_PATH = ../EXTERNAL/nsp-new
 NSP_GPU_ARCH = $(GPU_ARCH)

@@ -1,11 +1,6 @@
-// Rename the old sfBIN from nsparse.h so it does not conflict with the new
-// sfBIN struct defined by nsp-new's nsp_bin.cuh.
-// The #define must appear BEFORE nsp.h (which includes nsparse.h).
-#define sfBIN nsparse_sfBIN_old
+#include "nsp.h"
 
-#include "nsp.h"       // → nsparse.h (#pragma once, first time) → sfCSR + nsparse_sfBIN_old defined
-#undef sfBIN           // restore name: nsp_bin.cuh will now define the real new sfBIN
-#undef WARP            // nsparse.h defines WARP 32 which breaks CUB template param 'int WARP'
+// #undef WARP            // nsparse.h defines WARP 32 which breaks CUB template param 'int WARP'
 
 #include "nsp_support.cuh"  // VEC_GPU, VEC_CPU, ChronosDevice, linsol_error, constants
 #include "utility/memory.h" // CUDA_MALLOC, CUDA_FREE (brings in DIE via die.h)
